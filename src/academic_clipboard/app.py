@@ -33,12 +33,11 @@ class AcademicClipboardApp:
         self.search_after: str | None = None
 
         self.root.title("Academic Clipboard")
-        self.root.geometry("1120x720")
-        self.root.minsize(840, 520)
         self.root.attributes("-topmost", settings.always_on_top)
         self._configure_style()
         self._build_ui()
         self._bind_shortcuts()
+        self._apply_window_mode()
         self.refresh()
         self.root.after(self.settings.poll_milliseconds, self._poll_clipboard)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -48,32 +47,29 @@ class AcademicClipboardApp:
         if "vista" in style.theme_names():
             style.theme_use("vista")
         style.configure("Treeview", rowheight=30)
-        style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"))
+        style.configure("Title.TLabel", font=("Segoe UI", 15, "bold"))
         style.configure("Muted.TLabel", foreground="#5f6b66")
         style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
 
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self.root, padding=14)
+        outer = ttk.Frame(self.root, padding=10)
         outer.pack(fill="both", expand=True)
 
         heading = ttk.Frame(outer)
         heading.pack(fill="x", pady=(0, 12))
-        ttk.Label(heading, text="Academic Clipboard", style="Title.TLabel").pack(side="left")
-        ttk.Label(
-            heading,
-            text="Local-first research clipboard / 本地科研剪贴板",
-            style="Muted.TLabel",
-        ).pack(side="left", padx=14)
-        self.capture_button = ttk.Button(
-            heading, text="Pause capture / 暂停监听", command=self.toggle_capture
-        )
+        self.title_label = ttk.Label(heading, text="Academic Clipboard", style="Title.TLabel")
+        self.title_label.pack(side="left")
+        self.mode_button = ttk.Button(heading, text="Expand / 展开", command=self.toggle_window_mode)
+        self.mode_button.pack(side="right")
+        self.capture_button = ttk.Button(heading, text="Pause / 暂停", command=self.toggle_capture)
         self.capture_button.pack(side="right")
 
         toolbar = ttk.Frame(outer)
-        toolbar.pack(fill="x", pady=(0, 10))
-        ttk.Label(toolbar, text="Search / 搜索").pack(side="left")
+        toolbar.pack(fill="x", pady=(0, 8))
+        self.search_label = ttk.Label(toolbar, text="Search / 搜索")
+        self.search_label.pack(side="left")
         self.search_var = tk.StringVar()
-        search = ttk.Entry(toolbar, textvariable=self.search_var, width=42)
+        search = ttk.Entry(toolbar, textvariable=self.search_var, width=25)
         search.pack(side="left", fill="x", expand=True, padx=(8, 10))
         self.search_entry = search
         self.search_var.trace_add("write", self._schedule_refresh)
@@ -83,24 +79,22 @@ class AcademicClipboardApp:
             textvariable=self.kind_var,
             values=[KIND_LABELS[value] for value in KINDS],
             state="readonly",
-            width=17,
+            width=13,
         )
         kind.pack(side="left")
         kind.bind("<<ComboboxSelected>>", lambda _event: self.refresh())
-        ttk.Button(toolbar, text="Capture now / 立即保存", command=self.capture_now).pack(
-            side="left", padx=(10, 0)
-        )
-        ttk.Button(toolbar, text="Select all / 全选", command=self.select_all).pack(side="left", padx=(6, 0))
+        self.capture_now_button = ttk.Button(toolbar, text="Capture now / 立即保存", command=self.capture_now)
+        self.capture_now_button.pack(side="left", padx=(10, 0))
 
-        pane = ttk.Panedwindow(outer, orient="horizontal")
-        pane.pack(fill="both", expand=True)
-        list_frame = ttk.Frame(pane)
-        detail_frame = ttk.Frame(pane, padding=(12, 0, 0, 0))
-        pane.add(list_frame, weight=3)
-        pane.add(detail_frame, weight=2)
+        self.pane = ttk.Panedwindow(outer, orient="horizontal")
+        self.pane.pack(fill="both", expand=True)
+        self.list_frame = ttk.Frame(self.pane)
+        self.detail_frame = ttk.Frame(self.pane, padding=(12, 0, 0, 0))
+        self.pane.add(self.list_frame, weight=3)
+        self.pane.add(self.detail_frame, weight=2)
 
         columns = ("pin", "kind", "preview", "copies", "time")
-        self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", selectmode="extended")
+        self.tree = ttk.Treeview(self.list_frame, columns=columns, show="headings", selectmode="extended")
         for key, text, width, anchor in (
             ("pin", "★", 38, "center"),
             ("kind", "Type / 类型", 90, "center"),
@@ -110,7 +104,7 @@ class AcademicClipboardApp:
         ):
             self.tree.heading(key, text=text)
             self.tree.column(key, width=width, anchor=anchor, stretch=key == "preview")
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -118,12 +112,12 @@ class AcademicClipboardApp:
         self.tree.bind("<Double-1>", lambda _event: self.copy_selected(normalized=False))
 
         self.detail_title = ttk.Label(
-            detail_frame, text="Select an item / 选择一项", font=("Segoe UI", 13, "bold")
+            self.detail_frame, text="Select an item / 选择一项", font=("Segoe UI", 13, "bold")
         )
         self.detail_title.pack(fill="x")
-        self.detail_meta = ttk.Label(detail_frame, text="", style="Muted.TLabel", wraplength=390)
+        self.detail_meta = ttk.Label(self.detail_frame, text="", style="Muted.TLabel", wraplength=390)
         self.detail_meta.pack(fill="x", pady=(4, 8))
-        text_wrap = ttk.Frame(detail_frame)
+        text_wrap = ttk.Frame(self.detail_frame)
         text_wrap.pack(fill="both", expand=True)
         self.detail_text = tk.Text(
             text_wrap,
@@ -141,39 +135,52 @@ class AcademicClipboardApp:
         detail_scroll.pack(side="right", fill="y")
         self.detail_text.configure(state="disabled")
 
-        actions = ttk.Frame(detail_frame)
-        actions.pack(fill="x", pady=(10, 0))
+        quick_actions = ttk.Frame(outer)
+        quick_actions.pack(fill="x", pady=(8, 0))
+        for column in range(5):
+            quick_actions.columnconfigure(column, weight=1)
         ttk.Button(
-            actions,
-            text="Copy selected / 复制所选",
+            quick_actions,
+            text="Copy / 复制",
             style="Accent.TButton",
             command=lambda: self.copy_selected(normalized=False),
-        ).pack(side="left")
+        ).grid(row=0, column=0, sticky="ew")
         ttk.Button(
-            actions,
-            text="Copy formatted / 复制格式化",
+            quick_actions,
+            text="Format / 格式化",
             command=lambda: self.copy_selected(normalized=True),
-        ).pack(side="left", padx=6)
-        ttk.Button(actions, text="Pin / 置顶", command=self.toggle_pin).pack(side="left")
-        ttk.Button(actions, text="Delete / 删除", command=self.delete_selected).pack(side="left", padx=6)
+        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        ttk.Button(quick_actions, text="All / 全选", command=self.select_all).grid(
+            row=0, column=2, sticky="ew", padx=(4, 0)
+        )
+        ttk.Button(quick_actions, text="Pin / 置顶", command=self.toggle_pin).grid(
+            row=0, column=3, sticky="ew", padx=(4, 0)
+        )
+        ttk.Button(quick_actions, text="Delete / 删除", command=self.delete_selected).grid(
+            row=0, column=4, sticky="ew", padx=(4, 0)
+        )
 
         bottom = ttk.Frame(outer)
         bottom.pack(fill="x", pady=(10, 0))
         self.status_var = tk.StringVar(
             value="Ready. Sensitive-looking text is skipped / 已就绪，疑似敏感内容默认不保存"
         )
-        ttk.Label(bottom, textvariable=self.status_var, style="Muted.TLabel").pack(
-            side="left", fill="x", expand=True
-        )
+        self.status_label = ttk.Label(bottom, textvariable=self.status_var, style="Muted.TLabel")
+        self.status_label.pack(side="left", fill="x", expand=True)
         self.topmost_var = tk.BooleanVar(value=self.settings.always_on_top)
-        ttk.Checkbutton(
+        self.topmost_check = ttk.Checkbutton(
             bottom,
             text="Always on top / 窗口置顶",
             variable=self.topmost_var,
             command=self._set_topmost,
-        ).pack(side="right", padx=(8, 0))
-        ttk.Button(bottom, text="Export / 导出", command=self.export).pack(side="right", padx=(8, 0))
-        ttk.Button(bottom, text="Clear unpinned / 清空未置顶", command=self.clear_unpinned).pack(side="right")
+        )
+        self.topmost_check.pack(side="right", padx=(8, 0))
+        self.export_button = ttk.Button(bottom, text="Export / 导出", command=self.export)
+        self.export_button.pack(side="right", padx=(8, 0))
+        self.clear_button = ttk.Button(
+            bottom, text="Clear unpinned / 清空未置顶", command=self.clear_unpinned
+        )
+        self.clear_button.pack(side="right")
 
     def _bind_shortcuts(self) -> None:
         self.root.bind("<Control-f>", lambda _event: self._focus_search())
@@ -208,6 +215,49 @@ class AcademicClipboardApp:
             self.tree.focus(children[0])
             self._show_detail()
         return "break"
+
+    def _apply_window_mode(self) -> None:
+        compact = self.settings.compact_mode
+        detail_is_visible = str(self.detail_frame) in self.pane.panes()
+        if compact:
+            if detail_is_visible:
+                self.pane.forget(self.detail_frame)
+            self.tree.configure(displaycolumns=("pin", "kind", "preview"))
+            self.tree.column("pin", width=34, stretch=False)
+            self.tree.column("kind", width=72, stretch=False)
+            self.capture_now_button.pack_forget()
+            self.topmost_check.pack_forget()
+            self.export_button.pack_forget()
+            self.clear_button.pack_forget()
+            self.status_label.configure(wraplength=380)
+            self.mode_button.configure(text="Expand / 展开")
+            width, height = 390, 380
+            self.root.minsize(330, 260)
+            x = max(0, self.root.winfo_screenwidth() - width - 24)
+            y = 72
+        else:
+            if not detail_is_visible:
+                self.pane.add(self.detail_frame, weight=2)
+            self.tree.configure(displaycolumns=("pin", "kind", "preview", "copies", "time"))
+            self.tree.column("pin", width=38, stretch=False)
+            self.tree.column("kind", width=90, stretch=False)
+            if not self.capture_now_button.winfo_manager():
+                self.capture_now_button.pack(side="left", padx=(10, 0))
+            if not self.topmost_check.winfo_manager():
+                self.topmost_check.pack(side="right", padx=(8, 0))
+                self.export_button.pack(side="right", padx=(8, 0))
+                self.clear_button.pack(side="right")
+            self.status_label.configure(wraplength=560)
+            self.mode_button.configure(text="Compact / 悬浮")
+            width, height = 1060, 680
+            self.root.minsize(820, 520)
+            x = max(0, (self.root.winfo_screenwidth() - width) // 2)
+            y = max(0, (self.root.winfo_screenheight() - height) // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
+    def toggle_window_mode(self) -> None:
+        self.settings.compact_mode = not self.settings.compact_mode
+        self._apply_window_mode()
 
     def refresh(self) -> None:
         self.search_after = None
@@ -360,9 +410,7 @@ class AcademicClipboardApp:
 
     def toggle_capture(self) -> None:
         self.capture_enabled = not self.capture_enabled
-        self.capture_button.configure(
-            text="Pause capture / 暂停监听" if self.capture_enabled else "Resume capture / 恢复监听"
-        )
+        self.capture_button.configure(text="Pause / 暂停" if self.capture_enabled else "Resume / 恢复")
         self.status_var.set(
             "Capture active / 正在监听" if self.capture_enabled else "Capture paused / 已暂停监听"
         )

@@ -7,6 +7,7 @@ A local-first clipboard history and research-snippet manager for students, resea
 ## 功能 / Features
 
 - 多条文本剪贴板历史、搜索、类型筛选、置顶、删除和批量复制。
+- 默认以 390×380 的屏幕右侧置顶悬浮窗启动，还可继续手动缩小，阅读时不遮挡主要内容，并可一键展开完整详情。
 - 多选记录按顺序合并；原文和智能格式化结果可分别复制。
 - DOI 自动识别并转换为 Markdown 链接。
 - BibTeX 自动整理缩进与字段格式。
@@ -33,7 +34,7 @@ python -m venv .venv
 
 如果启动时提示缺少 Tkinter，Windows 请重新运行 Python 安装程序并启用 `tcl/tk and IDLE`；Ubuntu/Debian 可安装系统包 `python3-tk`。CLI 数据管理命令不依赖图形界面。
 
-程序运行期间会监听文本剪贴板。复制多段内容后，在列表中按 `Ctrl` 或 `Shift` 多选，点击 **Copy selected / 复制所选**，再到目标程序按 `Ctrl+V`。
+程序运行期间会监听文本剪贴板。复制多段内容后，在小窗列表中按 `Ctrl` 或 `Shift` 多选，点击 **Copy / 复制**，再到目标程序按 `Ctrl+V`。点击 **Expand / 展开** 可进入完整管理界面；再次点击 **Compact / 悬浮** 回到小窗。窗口模式和置顶选择会自动保存。
 
 ## 命令行 / CLI
 

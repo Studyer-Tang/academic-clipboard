@@ -27,7 +27,8 @@ class Settings:
     poll_milliseconds: int = 650
     join_separator: str = "\n\n"
     capture_sensitive: bool = False
-    always_on_top: bool = False
+    always_on_top: bool = True
+    compact_mode: bool = True
 
     @classmethod
     def load(cls, path: Path) -> "Settings":
