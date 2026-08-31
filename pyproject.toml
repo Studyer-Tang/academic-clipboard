@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "academic-clipboard"
+version = "0.1.0"
+description = "A local-first clipboard and research-snippet manager for students and researchers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Academic Clipboard contributors" }]
+keywords = ["clipboard", "research", "doi", "bibtex", "snippets", "productivity"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Win32 (MS Windows)",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Desktop Environment",
+]
+
+[project.optional-dependencies]
+dev = ["build>=1.2", "ruff==0.16.1"]
+
+[project.scripts]
+academic-clipboard = "academic_clipboard.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/Studyer-Tang/academic-clipboard"
+Issues = "https://github.com/Studyer-Tang/academic-clipboard/issues"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "ISC", "SIM"]
