@@ -5,7 +5,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from academic_clipboard.classifier import classify
@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_pinned ON clipboard_items(pinned DESC, 
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def _item(row: sqlite3.Row) -> ClipboardItem:
@@ -186,7 +186,9 @@ class ClipboardStore:
             return int(connection.execute("SELECT COUNT(*) FROM clipboard_items").fetchone()[0])
 
     def prune(self, max_items: int, retention_days: int) -> int:
-        cutoff = (datetime.now(UTC) - timedelta(days=max(1, retention_days))).isoformat(timespec="seconds")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, retention_days))).isoformat(
+            timespec="seconds"
+        )
         with self._connection() as connection:
             expired = connection.execute(
                 "DELETE FROM clipboard_items WHERE pinned = 0 AND created_at < ?", (cutoff,)
