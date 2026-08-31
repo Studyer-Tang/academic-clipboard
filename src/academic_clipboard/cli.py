@@ -58,6 +58,7 @@ def _rows_payload(rows: list[ClipboardItem]) -> list[dict[str, object]]:
             "title": item.title,
             "created_at": item.created_at,
             "pinned": item.pinned,
+            "tags": item.tags,
             "content": item.content,
         }
         for item in rows

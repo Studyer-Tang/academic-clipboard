@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     created_at TEXT NOT NULL,
     last_copied_at TEXT NOT NULL DEFAULT '',
     copy_count INTEGER NOT NULL DEFAULT 1,
-    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1))
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+    tags TEXT NOT NULL DEFAULT '',
+    custom_title INTEGER NOT NULL DEFAULT 0 CHECK (custom_title IN (0, 1))
 );
 CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_items(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_kind ON clipboard_items(kind);
@@ -47,6 +49,7 @@ def _item(row: sqlite3.Row) -> ClipboardItem:
         last_copied_at=row["last_copied_at"],
         copy_count=row["copy_count"],
         pinned=bool(row["pinned"]),
+        tags=row["tags"],
     )
 
 
@@ -56,6 +59,15 @@ class ClipboardStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as connection:
             connection.executescript(SCHEMA)
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(clipboard_items)").fetchall()
+            }
+            if "tags" not in columns:
+                connection.execute("ALTER TABLE clipboard_items ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+            if "custom_title" not in columns:
+                connection.execute(
+                    "ALTER TABLE clipboard_items ADD COLUMN custom_title INTEGER NOT NULL DEFAULT 0"
+                )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -87,7 +99,8 @@ class ClipboardStore:
                     normalized_content = excluded.normalized_content,
                     kind = excluded.kind,
                     subtype = excluded.subtype,
-                    title = excluded.title,
+                    title = CASE clipboard_items.custom_title
+                        WHEN 1 THEN clipboard_items.title ELSE excluded.title END,
                     created_at = excluded.created_at,
                     copy_count = clipboard_items.copy_count + 1
                 """,
@@ -111,9 +124,11 @@ class ClipboardStore:
         clauses: list[str] = []
         parameters: list[object] = []
         if search.strip():
-            clauses.append("(content LIKE ? OR normalized_content LIKE ? OR title LIKE ? OR subtype LIKE ?)")
+            clauses.append(
+                "(content LIKE ? OR normalized_content LIKE ? OR title LIKE ? OR subtype LIKE ? OR tags LIKE ?)"
+            )
             term = f"%{search.strip()}%"
-            parameters.extend([term, term, term, term])
+            parameters.extend([term, term, term, term, term])
         if kind and kind != "all":
             clauses.append("kind = ?")
             parameters.append(kind)
@@ -148,6 +163,44 @@ class ClipboardStore:
                 f"copy_count = copy_count + 1 WHERE id IN ({placeholders})",
                 [_now(), *identifiers],
             )
+
+    def update(self, identifier: int, content: str, title: str, tags: str = "") -> ClipboardItem:
+        clean_content = content.strip()
+        if not clean_content:
+            raise ValueError("content cannot be empty")
+        detected = classify(clean_content)
+        digest = hashlib.sha256(clean_content.encode("utf-8")).hexdigest()
+        clean_title = " ".join(title.split()) or detected.title
+        clean_tags = ", ".join(dict.fromkeys(tag.strip() for tag in tags.split(",") if tag.strip()))
+        try:
+            with self._connection() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE clipboard_items SET
+                        content = ?, content_hash = ?, normalized_content = ?, kind = ?, subtype = ?,
+                        title = ?, tags = ?, custom_title = 1
+                    WHERE id = ?
+                    """,
+                    (
+                        clean_content,
+                        digest,
+                        detected.normalized_content,
+                        detected.kind,
+                        detected.subtype,
+                        clean_title,
+                        clean_tags,
+                        identifier,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise KeyError(identifier)
+                row = connection.execute(
+                    "SELECT * FROM clipboard_items WHERE id = ?", (identifier,)
+                ).fetchone()
+        except sqlite3.IntegrityError as error:
+            raise ValueError("another item already contains the same text") from error
+        assert row is not None
+        return _item(row)
 
     def toggle_pinned(self, identifiers: list[int]) -> None:
         if not identifiers:
@@ -218,6 +271,7 @@ class ClipboardStore:
                 "last_copied_at": item.last_copied_at,
                 "copy_count": item.copy_count,
                 "pinned": item.pinned,
+                "tags": item.tags,
             }
             for item in rows
         ]
@@ -235,6 +289,7 @@ class ClipboardStore:
                     f"- Type: `{item.kind}/{item.subtype}`",
                     f"- Captured: {item.created_at}",
                     f"- Pinned: {'yes' if item.pinned else 'no'}",
+                    f"- Tags: {item.tags or '-'}",
                     "",
                     item.normalized_content,
                     "",

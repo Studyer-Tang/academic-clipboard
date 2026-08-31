@@ -23,3 +23,4 @@ class ClipboardItem:
     last_copied_at: str
     copy_count: int
     pinned: bool
+    tags: str = ""

@@ -4,23 +4,16 @@ import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
 from queue import Empty, SimpleQueue
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
+from academic_clipboard.dialogs import edit_item, edit_settings, show_shortcuts
+from academic_clipboard.hotkeys import GlobalHotkey, parse_hotkey
 from academic_clipboard.models import ClipboardItem
 from academic_clipboard.privacy import sensitive_reason
 from academic_clipboard.settings import Settings, application_dir
 from academic_clipboard.storage import ClipboardStore
-
-KINDS = ("all", "doi", "bibtex", "url", "code", "title", "text")
-KIND_LABELS = {
-    "all": "All / 全部",
-    "doi": "DOI",
-    "bibtex": "BibTeX",
-    "url": "URL",
-    "code": "Code / 代码",
-    "title": "Title / 标题",
-    "text": "Text / 文本",
-}
+from academic_clipboard.theme import apply_theme
+from academic_clipboard.ui import KIND_DISPLAY, KIND_LABELS, build_ui
 
 
 class AcademicClipboardApp:
@@ -31,6 +24,7 @@ class AcademicClipboardApp:
         settings: Settings,
         settings_path: Path,
         enable_tray: bool = True,
+        enable_hotkey: bool | None = None,
     ):
         self.root = root
         self.store = store
@@ -42,6 +36,7 @@ class AcademicClipboardApp:
         self.search_after: str | None = None
         self.ui_actions: SimpleQueue[Callable[[], None]] = SimpleQueue()
         self.tray = None
+        self.hotkey: GlobalHotkey | None = None
         self.shutting_down = False
 
         self.root.title("Academic Clipboard")
@@ -51,6 +46,9 @@ class AcademicClipboardApp:
         self._bind_shortcuts()
         self._apply_window_mode()
         self.refresh()
+        hotkey_enabled = enable_tray if enable_hotkey is None else enable_hotkey
+        if hotkey_enabled:
+            self._restart_hotkey()
         if enable_tray:
             self._start_tray()
         self.root.after(100, self._process_ui_actions)
@@ -58,152 +56,35 @@ class AcademicClipboardApp:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _configure_style(self) -> None:
-        style = ttk.Style(self.root)
-        if "vista" in style.theme_names():
-            style.theme_use("vista")
-        style.configure("Treeview", rowheight=30)
-        style.configure("Title.TLabel", font=("Segoe UI", 15, "bold"))
-        style.configure("Muted.TLabel", foreground="#5f6b66")
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
+        self.palette = apply_theme(self.root, self.settings.theme)
 
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self.root, padding=10)
-        outer.pack(fill="both", expand=True)
-
-        heading = ttk.Frame(outer)
-        heading.pack(fill="x", pady=(0, 12))
-        self.title_label = ttk.Label(heading, text="Academic Clipboard", style="Title.TLabel")
-        self.title_label.pack(side="left")
-        self.mode_button = ttk.Button(heading, text="Expand / 展开", command=self.toggle_window_mode)
-        self.mode_button.pack(side="right")
-        self.capture_button = ttk.Button(heading, text="Pause / 暂停", command=self.toggle_capture)
-        self.capture_button.pack(side="right")
-
-        toolbar = ttk.Frame(outer)
-        toolbar.pack(fill="x", pady=(0, 8))
-        self.search_label = ttk.Label(toolbar, text="Search / 搜索")
-        self.search_label.pack(side="left")
-        self.search_var = tk.StringVar()
-        search = ttk.Entry(toolbar, textvariable=self.search_var, width=25)
-        search.pack(side="left", fill="x", expand=True, padx=(8, 10))
-        self.search_entry = search
-        self.search_var.trace_add("write", self._schedule_refresh)
-        self.kind_var = tk.StringVar(value=KIND_LABELS["all"])
-        kind = ttk.Combobox(
-            toolbar,
-            textvariable=self.kind_var,
-            values=[KIND_LABELS[value] for value in KINDS],
-            state="readonly",
-            width=13,
-        )
-        kind.pack(side="left")
-        kind.bind("<<ComboboxSelected>>", lambda _event: self.refresh())
-        self.capture_now_button = ttk.Button(toolbar, text="Capture now / 立即保存", command=self.capture_now)
-        self.capture_now_button.pack(side="left", padx=(10, 0))
-
-        self.pane = ttk.Panedwindow(outer, orient="horizontal")
-        self.pane.pack(fill="both", expand=True)
-        self.list_frame = ttk.Frame(self.pane)
-        self.detail_frame = ttk.Frame(self.pane, padding=(12, 0, 0, 0))
-        self.pane.add(self.list_frame, weight=3)
-        self.pane.add(self.detail_frame, weight=2)
-
-        columns = ("pin", "kind", "preview", "copies", "time")
-        self.tree = ttk.Treeview(self.list_frame, columns=columns, show="headings", selectmode="extended")
-        for key, text, width, anchor in (
-            ("pin", "★", 38, "center"),
-            ("kind", "Type / 类型", 90, "center"),
-            ("preview", "Content / 内容", 390, "w"),
-            ("copies", "Copies", 60, "center"),
-            ("time", "Captured / 时间", 150, "center"),
-        ):
-            self.tree.heading(key, text=text)
-            self.tree.column(key, width=width, anchor=anchor, stretch=key == "preview")
-        scrollbar = ttk.Scrollbar(self.list_frame, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=scrollbar.set)
-        self.tree.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        self.tree.bind("<<TreeviewSelect>>", self._show_detail)
-        self.tree.bind("<Double-1>", lambda _event: self.copy_selected(normalized=False))
-
-        self.detail_title = ttk.Label(
-            self.detail_frame, text="Select an item / 选择一项", font=("Segoe UI", 13, "bold")
-        )
-        self.detail_title.pack(fill="x")
-        self.detail_meta = ttk.Label(self.detail_frame, text="", style="Muted.TLabel", wraplength=390)
-        self.detail_meta.pack(fill="x", pady=(4, 8))
-        text_wrap = ttk.Frame(self.detail_frame)
-        text_wrap.pack(fill="both", expand=True)
-        self.detail_text = tk.Text(
-            text_wrap,
-            wrap="word",
-            undo=False,
-            font=("Cascadia Mono", 10),
-            padx=10,
-            pady=10,
-            relief="solid",
-            borderwidth=1,
-        )
-        detail_scroll = ttk.Scrollbar(text_wrap, orient="vertical", command=self.detail_text.yview)
-        self.detail_text.configure(yscrollcommand=detail_scroll.set)
-        self.detail_text.pack(side="left", fill="both", expand=True)
-        detail_scroll.pack(side="right", fill="y")
-        self.detail_text.configure(state="disabled")
-
-        quick_actions = ttk.Frame(outer)
-        quick_actions.pack(fill="x", pady=(8, 0))
-        for column in range(5):
-            quick_actions.columnconfigure(column, weight=1)
-        ttk.Button(
-            quick_actions,
-            text="Copy / 复制",
-            style="Accent.TButton",
-            command=lambda: self.copy_selected(normalized=False),
-        ).grid(row=0, column=0, sticky="ew")
-        ttk.Button(
-            quick_actions,
-            text="Format / 格式化",
-            command=lambda: self.copy_selected(normalized=True),
-        ).grid(row=0, column=1, sticky="ew", padx=(4, 0))
-        ttk.Button(quick_actions, text="All / 全选", command=self.select_all).grid(
-            row=0, column=2, sticky="ew", padx=(4, 0)
-        )
-        ttk.Button(quick_actions, text="Pin / 置顶", command=self.toggle_pin).grid(
-            row=0, column=3, sticky="ew", padx=(4, 0)
-        )
-        ttk.Button(quick_actions, text="Delete / 删除", command=self.delete_selected).grid(
-            row=0, column=4, sticky="ew", padx=(4, 0)
-        )
-
-        bottom = ttk.Frame(outer)
-        bottom.pack(fill="x", pady=(10, 0))
-        self.status_var = tk.StringVar(
-            value="Ready. Sensitive-looking text is skipped / 已就绪，疑似敏感内容默认不保存"
-        )
-        self.status_label = ttk.Label(bottom, textvariable=self.status_var, style="Muted.TLabel")
-        self.status_label.pack(side="left", fill="x", expand=True)
-        self.topmost_var = tk.BooleanVar(value=self.settings.always_on_top)
-        self.topmost_check = ttk.Checkbutton(
-            bottom,
-            text="Always on top / 窗口置顶",
-            variable=self.topmost_var,
-            command=self._set_topmost,
-        )
-        self.topmost_check.pack(side="right", padx=(8, 0))
-        self.export_button = ttk.Button(bottom, text="Export / 导出", command=self.export)
-        self.export_button.pack(side="right", padx=(8, 0))
-        self.clear_button = ttk.Button(
-            bottom, text="Clear unpinned / 清空未置顶", command=self.clear_unpinned
-        )
-        self.clear_button.pack(side="right")
+        build_ui(self)
 
     def _bind_shortcuts(self) -> None:
+        self.root.bind("<F1>", lambda _event: self.open_shortcuts())
         self.root.bind("<Control-f>", lambda _event: self._focus_search())
         self.root.bind("<Delete>", lambda _event: self.delete_selected())
         self.root.bind("<Control-Return>", lambda _event: self.copy_selected(normalized=False))
         self.root.bind("<Control-Shift-Return>", lambda _event: self.copy_selected(normalized=True))
-        self.root.bind("<Escape>", lambda _event: self.search_var.set(""))
+        self.root.bind("<Escape>", lambda _event: self._handle_escape())
         self.tree.bind("<Control-a>", lambda _event: self.select_all())
+        self.tree.bind("<Return>", lambda _event: self.copy_selected(normalized=False))
+        self.tree.bind("<Key-e>", lambda _event: self.edit_selected())
+        for number in range(1, 10):
+            self.tree.bind(
+                f"<Key-{number}>",
+                lambda _event, index=number - 1: self._quick_copy_index(index),
+            )
+
+    def _style_context_menu(self) -> None:
+        self.context_menu.configure(
+            background=self.palette.surface,
+            foreground=self.palette.text,
+            activebackground=self.palette.selection,
+            activeforeground=self.palette.text,
+            borderwidth=1,
+        )
 
     def _focus_search(self) -> str:
         self.search_entry.focus_set()
@@ -229,6 +110,30 @@ class AcademicClipboardApp:
             self.tree.selection_set(children)
             self.tree.focus(children[0])
             self._show_detail()
+        return "break"
+
+    def _handle_escape(self) -> str:
+        if self.search_var.get():
+            self.search_var.set("")
+        elif self.tray is not None:
+            self.hide_window()
+        return "break"
+
+    def _quick_copy_index(self, index: int) -> str:
+        children = self.tree.get_children()
+        if index < len(children):
+            self.tree.selection_set(children[index])
+            self.tree.focus(children[index])
+            self.copy_selected(normalized=False)
+        return "break"
+
+    def _show_context_menu(self, event: tk.Event) -> str:
+        row = self.tree.identify_row(event.y)
+        if row:
+            if row not in self.tree.selection():
+                self.tree.selection_set(row)
+                self.tree.focus(row)
+            self.context_menu.tk_popup(event.x_root, event.y_root)
         return "break"
 
     def _apply_window_mode(self) -> None:
@@ -274,6 +179,17 @@ class AcademicClipboardApp:
         self.settings.compact_mode = not self.settings.compact_mode
         self._apply_window_mode()
 
+    def _restart_hotkey(self) -> None:
+        if self.hotkey is not None:
+            self.hotkey.stop()
+        self.hotkey = GlobalHotkey(
+            self.settings.global_hotkey,
+            lambda: self._enqueue(self.show_window),
+        )
+        registered, error = self.hotkey.start()
+        if not registered:
+            self.status_var.set(f"Hotkey unavailable: {error} / 全局快捷键不可用")
+
     def _enqueue(self, action: Callable[[], None]) -> None:
         self.ui_actions.put(action)
 
@@ -306,7 +222,12 @@ class AcademicClipboardApp:
     def show_window(self) -> None:
         self.root.deiconify()
         self.root.lift()
-        self.root.after_idle(self.root.focus_force)
+        self.root.focus_force()
+        children = self.tree.get_children()
+        if children and not self.tree.selection():
+            self.tree.selection_set(children[0])
+            self.tree.focus(children[0])
+        self.tree.focus_set()
 
     def hide_window(self) -> None:
         self.root.withdraw()
@@ -317,8 +238,12 @@ class AcademicClipboardApp:
         rows = self.store.list_items(self.search_var.get(), self._selected_kind())
         self.items = {item.id: item for item in rows}
         self.tree.delete(*self.tree.get_children())
+        if rows:
+            self.empty_label.place_forget()
+        else:
+            self.empty_label.place(relx=0.5, rely=0.48, anchor="center")
         for item in rows:
-            preview = " ".join(item.content.split())
+            preview = " ".join((item.title or item.content).split())
             if len(preview) > 90:
                 preview = preview[:89] + "…"
             captured = item.created_at.replace("T", " ")[:19]
@@ -326,7 +251,13 @@ class AcademicClipboardApp:
                 "",
                 "end",
                 iid=str(item.id),
-                values=("★" if item.pinned else "", item.kind, preview, item.copy_count, captured),
+                values=(
+                    "★" if item.pinned else "",
+                    KIND_DISPLAY.get(item.kind, item.kind.upper()),
+                    preview,
+                    item.copy_count,
+                    captured,
+                ),
             )
         remaining = [identifier for identifier in selected if self.tree.exists(identifier)]
         if remaining:
@@ -353,6 +284,7 @@ class AcademicClipboardApp:
             self.detail_title.configure(text=item.title or item.kind)
             self.detail_meta.configure(
                 text=f"{item.kind}/{item.subtype} · {item.created_at} · copied {item.copy_count} time(s)"
+                + (f" · tags: {item.tags}" if item.tags else "")
             )
             body = item.content
         self.detail_text.configure(state="normal")
@@ -420,6 +352,65 @@ class AcademicClipboardApp:
         self.refresh()
         mode = "formatted" if normalized else "original"
         self.status_var.set(f"Copied {len(items)} {mode} item(s) / 已复制 {len(items)} 项")
+        if self.settings.auto_hide_after_copy and self.tray is not None:
+            self.root.after(90, self.hide_window)
+
+    def edit_selected(self) -> str:
+        identifiers = self._selected_ids()
+        if len(identifiers) != 1:
+            self.status_var.set("Select exactly one item to edit / 请选择一项进行编辑")
+            return "break"
+        item = self.items.get(identifiers[0]) or self.store.get_many(identifiers)[0]
+        result = edit_item(self.root, item, self.palette)
+        if result is None:
+            return "break"
+        title, tags, content = result
+        try:
+            self.store.update(item.id, content, title, tags)
+        except ValueError as error:
+            messagebox.showerror("Academic Clipboard", str(error), parent=self.root)
+            return "break"
+        self.refresh()
+        self.tree.selection_set(str(item.id))
+        self.tree.focus(str(item.id))
+        self._show_detail()
+        self.status_var.set("Snippet updated / 片段已更新")
+        return "break"
+
+    def open_settings(self) -> None:
+        previous_hotkey = self.settings.global_hotkey
+        previous_theme = self.settings.theme
+        if not edit_settings(self.root, self.settings):
+            return
+        try:
+            parse_hotkey(self.settings.global_hotkey)
+        except ValueError as error:
+            self.settings.global_hotkey = previous_hotkey
+            messagebox.showerror(
+                "Academic Clipboard",
+                f"Invalid hotkey: {error} / 快捷键格式无效",
+                parent=self.root,
+            )
+        self.settings.save(self.settings_path)
+        self.topmost_var.set(self.settings.always_on_top)
+        self._set_topmost()
+        if self.settings.theme != previous_theme:
+            self.palette = apply_theme(self.root, self.settings.theme)
+            self._style_context_menu()
+            self.detail_text.configure(
+                background=self.palette.surface,
+                foreground=self.palette.text,
+                insertbackground=self.palette.text,
+                selectbackground=self.palette.selection,
+            )
+        if self.settings.global_hotkey != previous_hotkey:
+            self._restart_hotkey()
+        self.store.prune(self.settings.max_items, self.settings.retention_days)
+        self.refresh()
+
+    def open_shortcuts(self) -> str:
+        show_shortcuts(self.root, self.settings.global_hotkey)
+        return "break"
 
     def toggle_pin(self) -> None:
         identifiers = self._selected_ids()
@@ -462,7 +453,7 @@ class AcademicClipboardApp:
 
     def toggle_capture(self) -> None:
         self.capture_enabled = not self.capture_enabled
-        self.capture_button.configure(text="Pause / 暂停" if self.capture_enabled else "Resume / 恢复")
+        self.capture_button.configure(text="⏸" if self.capture_enabled else "▶")
         self.status_var.set(
             "Capture active / 正在监听" if self.capture_enabled else "Capture paused / 已暂停监听"
         )
@@ -488,6 +479,9 @@ class AcademicClipboardApp:
         if self.tray is not None:
             self.tray.stop()
             self.tray = None
+        if self.hotkey is not None:
+            self.hotkey.stop()
+            self.hotkey = None
         self.root.destroy()
 
 

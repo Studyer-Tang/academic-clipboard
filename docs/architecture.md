@@ -20,6 +20,9 @@ privacy filter (before storage)
 - `privacy.py` rejects common secret patterns before the GUI calls storage.
 - `settings.py` resolves per-platform data directories and persists non-secret preferences.
 - `tray.py` owns the generated tray icon and menu; callbacks are queued back onto Tk's UI thread.
+- `hotkeys.py` owns Windows `RegisterHotKey` parsing and the background message loop.
+- `dialogs.py` owns snippet editing and application settings dialogs.
+- `theme.py` defines light/dark palettes and applies the ttk design system.
 - `startup.py` provides detached `pythonw` launch and per-user Windows startup registration.
 - `single_instance.py` prevents duplicate Windows clipboard listeners with a named mutex.
 

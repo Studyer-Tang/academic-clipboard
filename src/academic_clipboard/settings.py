@@ -29,6 +29,9 @@ class Settings:
     capture_sensitive: bool = False
     always_on_top: bool = True
     compact_mode: bool = True
+    auto_hide_after_copy: bool = True
+    global_hotkey: str = "Ctrl+Alt+V"
+    theme: str = "system"
 
     @classmethod
     def load(cls, path: Path) -> "Settings":

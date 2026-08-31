@@ -1,6 +1,8 @@
 import json
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from academic_clipboard.storage import ClipboardStore
@@ -56,6 +58,52 @@ class StorageTests(unittest.TestCase):
         self.store.export_markdown(markdown_path)
         self.assertEqual(json.loads(json_path.read_text(encoding="utf-8"))[0]["kind"], "doi")
         self.assertIn("https://doi.org/10.1000/export", markdown_path.read_text(encoding="utf-8"))
+
+    def test_edit_tags_search_and_custom_title_survive_recapture(self) -> None:
+        item = self.store.add("A Useful Research Paper for Editing")
+        updated = self.store.update(
+            item.id,
+            "A Useful Research Paper for Editing",
+            "My reading note",
+            "causal, methods, causal",
+        )
+        self.assertEqual(updated.title, "My reading note")
+        self.assertEqual(updated.tags, "causal, methods")
+        self.assertEqual(self.store.list_items(search="methods")[0].id, item.id)
+        recaptured = self.store.add("A Useful Research Paper for Editing")
+        self.assertEqual(recaptured.title, "My reading note")
+
+    def test_edit_rejects_duplicate_content(self) -> None:
+        first = self.store.add("10.1000/first")
+        second = self.store.add("10.1000/second")
+        with self.assertRaisesRegex(ValueError, "same text"):
+            self.store.update(second.id, first.content, second.title)
+
+    def test_existing_v01_database_is_migrated(self) -> None:
+        legacy_path = self.root / "legacy.db"
+        with closing(sqlite3.connect(legacy_path)) as connection:
+            connection.execute(
+                """
+                CREATE TABLE clipboard_items (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    content TEXT NOT NULL,
+                    content_hash TEXT NOT NULL UNIQUE,
+                    normalized_content TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    subtype TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    last_copied_at TEXT NOT NULL DEFAULT '',
+                    copy_count INTEGER NOT NULL DEFAULT 1,
+                    pinned INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            connection.commit()
+        migrated = ClipboardStore(legacy_path)
+        item = migrated.add("10.1000/migrated")
+        self.assertEqual(item.tags, "")
+        self.assertEqual(migrated.update(item.id, item.content, item.title, "legacy").tags, "legacy")
 
 
 if __name__ == "__main__":
