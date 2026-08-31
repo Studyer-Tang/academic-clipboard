@@ -20,7 +20,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--database", type=Path, help="override the local SQLite database path")
     commands = parser.add_subparsers(dest="command")
-    commands.add_parser("run", help="open the desktop clipboard drawer")
+    run_command = commands.add_parser("run", help="open the desktop clipboard drawer")
+    run_command.add_argument("--hidden", action="store_true", help="start in the system tray")
+    commands.add_parser("launch", help="start the Windows tray app without keeping a terminal open")
+
+    startup = commands.add_parser("startup", help="manage launch at Windows sign-in")
+    startup.add_argument("action", choices=("enable", "disable", "status"), nargs="?", default="status")
 
     listing = commands.add_parser("list", help="list recent clipboard items")
     listing.add_argument("--kind", default="all")
@@ -91,7 +96,34 @@ def main(argv: list[str] | None = None) -> int:
                 "请安装带 Tcl/Tk 的标准版 Python。\n",
             )
 
-        return run()
+        return run(start_hidden=getattr(args, "hidden", False))
+    if args.command == "launch":
+        from academic_clipboard.startup import launch_background
+
+        try:
+            launch_background()
+        except OSError as error:
+            parser.error(str(error))
+        print("Academic Clipboard started in the background / 已在后台启动")
+        return 0
+    if args.command == "startup":
+        from academic_clipboard.startup import set_startup, startup_command
+
+        try:
+            if args.action == "enable":
+                set_startup(True)
+                print("startup=enabled / 已启用开机启动")
+            elif args.action == "disable":
+                set_startup(False)
+                print("startup=disabled / 已关闭开机启动")
+            else:
+                command = startup_command()
+                print("startup=enabled" if command else "startup=disabled")
+                if command:
+                    print(f"command={command}")
+        except OSError as error:
+            parser.error(str(error))
+        return 0
     store = _store(args.database)
     if args.command == "list":
         _print_rows(store.list_items(kind=args.kind, limit=args.limit), args.json)

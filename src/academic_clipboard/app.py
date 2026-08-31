@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
+from queue import Empty, SimpleQueue
 from tkinter import filedialog, messagebox, ttk
 
 from academic_clipboard.models import ClipboardItem
@@ -22,7 +24,14 @@ KIND_LABELS = {
 
 
 class AcademicClipboardApp:
-    def __init__(self, root: tk.Tk, store: ClipboardStore, settings: Settings, settings_path: Path):
+    def __init__(
+        self,
+        root: tk.Tk,
+        store: ClipboardStore,
+        settings: Settings,
+        settings_path: Path,
+        enable_tray: bool = True,
+    ):
         self.root = root
         self.store = store
         self.settings = settings
@@ -31,6 +40,9 @@ class AcademicClipboardApp:
         self.last_clipboard = ""
         self.items: dict[int, ClipboardItem] = {}
         self.search_after: str | None = None
+        self.ui_actions: SimpleQueue[Callable[[], None]] = SimpleQueue()
+        self.tray = None
+        self.shutting_down = False
 
         self.root.title("Academic Clipboard")
         self.root.attributes("-topmost", settings.always_on_top)
@@ -39,6 +51,9 @@ class AcademicClipboardApp:
         self._bind_shortcuts()
         self._apply_window_mode()
         self.refresh()
+        if enable_tray:
+            self._start_tray()
+        self.root.after(100, self._process_ui_actions)
         self.root.after(self.settings.poll_milliseconds, self._poll_clipboard)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -259,6 +274,43 @@ class AcademicClipboardApp:
         self.settings.compact_mode = not self.settings.compact_mode
         self._apply_window_mode()
 
+    def _enqueue(self, action: Callable[[], None]) -> None:
+        self.ui_actions.put(action)
+
+    def _process_ui_actions(self) -> None:
+        if self.shutting_down:
+            return
+        while True:
+            try:
+                action = self.ui_actions.get_nowait()
+            except Empty:
+                break
+            action()
+        self.root.after(100, self._process_ui_actions)
+
+    def _start_tray(self) -> None:
+        try:
+            from academic_clipboard.tray import TrayController
+
+            self.tray = TrayController(
+                on_show=lambda: self._enqueue(self.show_window),
+                on_toggle_capture=lambda: self._enqueue(self.toggle_capture),
+                on_quit=lambda: self._enqueue(self.quit),
+                capture_enabled=lambda: self.capture_enabled,
+            )
+            self.tray.start()
+        except Exception as error:
+            self.tray = None
+            self.status_var.set(f"Tray unavailable: {error} / 系统托盘不可用")
+
+    def show_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.after_idle(self.root.focus_force)
+
+    def hide_window(self) -> None:
+        self.root.withdraw()
+
     def refresh(self) -> None:
         self.search_after = None
         selected = set(self.tree.selection())
@@ -414,22 +466,49 @@ class AcademicClipboardApp:
         self.status_var.set(
             "Capture active / 正在监听" if self.capture_enabled else "Capture paused / 已暂停监听"
         )
+        if self.tray is not None:
+            self.tray.refresh()
 
     def _set_topmost(self) -> None:
         self.settings.always_on_top = self.topmost_var.get()
         self.root.attributes("-topmost", self.settings.always_on_top)
 
     def close(self) -> None:
+        if self.tray is not None:
+            self.settings.save(self.settings_path)
+            self.hide_window()
+            return
+        self.quit()
+
+    def quit(self) -> None:
+        if self.shutting_down:
+            return
+        self.shutting_down = True
         self.settings.save(self.settings_path)
+        if self.tray is not None:
+            self.tray.stop()
+            self.tray = None
         self.root.destroy()
 
 
-def run() -> int:
+def run(start_hidden: bool = False) -> int:
+    from academic_clipboard.single_instance import SingleInstance, notify_already_running
+
+    instance = SingleInstance()
+    if instance.already_running:
+        instance.close()
+        notify_already_running()
+        return 0
     home = application_dir()
     settings_path = home / "settings.json"
     settings = Settings.load(settings_path)
     store = ClipboardStore(home / "clipboard.db")
-    root = tk.Tk()
-    AcademicClipboardApp(root, store, settings, settings_path)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        app = AcademicClipboardApp(root, store, settings, settings_path)
+        if start_hidden:
+            app.hide_window()
+        root.mainloop()
+    finally:
+        instance.close()
     return 0

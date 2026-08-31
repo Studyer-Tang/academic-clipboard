@@ -36,10 +36,32 @@ python -m venv .venv
 
 程序运行期间会监听文本剪贴板。复制多段内容后，在小窗列表中按 `Ctrl` 或 `Shift` 多选，点击 **Copy / 复制**，再到目标程序按 `Ctrl+V`。点击 **Expand / 展开** 可进入完整管理界面；再次点击 **Compact / 悬浮** 回到小窗。窗口模式和置顶选择会自动保存。
 
+关闭窗口右上角的 `×` 后，程序会缩到 Windows 右下角系统托盘并继续监听，不再退出。双击托盘图标可以恢复小窗；右键菜单可暂停监听或彻底退出。如果图标没有直接显示，请在任务栏右侧的 `^` 隐藏图标区域中查找。
+
+### 无终端启动与开机启动 / Tray launch
+
+日常使用不需要一直保留 PowerShell。首次安装完成后，可执行一次：
+
+```powershell
+.\.venv\Scripts\academic-clipboard.exe launch
+```
+
+命令会立即返回，程序在后台托盘运行。也可以直接双击项目根目录的 `launch-academic-clipboard.vbs`。若要登录 Windows 后自动在托盘启动：
+
+```powershell
+.\.venv\Scripts\academic-clipboard.exe startup enable
+.\.venv\Scripts\academic-clipboard.exe startup status
+.\.venv\Scripts\academic-clipboard.exe startup disable
+```
+
+开机启动只写入当前 Windows 用户的 `HKCU\...\Run` 项，不需要管理员权限。移动项目目录或重建 `.venv` 后，请重新执行 `startup enable` 更新路径。
+
 ## 命令行 / CLI
 
 ```powershell
 academic-clipboard                 # 启动桌面界面
+academic-clipboard launch          # 无终端启动到系统托盘
+academic-clipboard startup enable  # 当前用户登录后自动启动
 academic-clipboard list --limit 20
 academic-clipboard search "causal inference"
 academic-clipboard list --kind doi --json
@@ -83,7 +105,8 @@ academic-clipboard --database .\demo.db list
 ## 当前边界 / Current limits
 
 - v0.1 只捕获文本，不捕获图片或文件。
-- 关闭主窗口后监听即停止；暂不提供系统托盘和全局快捷键。
+- 当前支持 Windows 系统托盘；macOS/Linux 的托盘行为取决于桌面环境。
+- 暂不提供全局快捷键，显示窗口需要双击托盘图标。
 - 标题、代码语言与 URL 类别使用本地规则推断，可能需要人工修正。
 - 不联网查询 DOI 元数据，也不会自动访问论文网页。
 
@@ -101,7 +124,7 @@ python -m venv .venv
 
 ## Roadmap
 
-- v0.2：可编辑片段、自定义合并分隔符、Windows 托盘和可配置全局快捷键。
+- v0.2：可编辑片段、自定义合并分隔符和可配置全局快捷键。
 - v0.3：可选的系统密钥保护、图片/文件历史、导入导出策略。
 - v1.0：稳定的数据迁移、无障碍改进、签名桌面安装包。
 

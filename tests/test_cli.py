@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from academic_clipboard.cli import main
 from academic_clipboard.storage import ClipboardStore
@@ -42,6 +43,13 @@ class CliTests(unittest.TestCase):
         self.assertTrue(destination.exists())
         _, cleared = self.run_cli("clear", "--all", "--yes")
         self.assertIn("deleted=2", cleared)
+
+    def test_background_launch_command_returns_immediately(self) -> None:
+        with patch("academic_clipboard.startup.launch_background") as launch:
+            code, output = self.run_cli("launch")
+        self.assertEqual(code, 0)
+        launch.assert_called_once_with()
+        self.assertIn("后台启动", output)
 
 
 if __name__ == "__main__":

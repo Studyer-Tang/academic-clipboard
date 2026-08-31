@@ -10,4 +10,5 @@ All notable changes will be documented here.
 - Added search, filters, pinning, deletion, retention, and JSON/Markdown export.
 - Added default sensitive-content filtering and bilingual desktop labels.
 - Added a compact, always-on-top floating window as the default reading companion, with one-click expansion.
+- Added a Windows system-tray lifecycle, terminal-free launcher, per-user startup management, and single-instance protection.
 - Added a dependency-free CLI and automated tests.
