@@ -2,6 +2,12 @@
 
 All notable changes will be documented here.
 
+## 0.3.1 - 2026-09-01
+
+- Added an in-place screenshot thumbnail card to the compact floating window.
+- Automatically selects and previews a newly captured screenshot without expanding the window.
+- Added double-click copy directly from the compact thumbnail.
+
 ## 0.3.0 - 2026-09-01
 
 - Added automatic Windows screenshot and image clipboard capture.

@@ -39,6 +39,7 @@ class AcademicClipboardApp:
         self.last_image_hash = ""
         self.ignore_image_until = 0.0
         self.detail_photo: ImageTk.PhotoImage | None = None
+        self.compact_photo: ImageTk.PhotoImage | None = None
         self.items: dict[int, ClipboardItem] = {}
         self.search_after: str | None = None
         self.ui_actions: SimpleQueue[Callable[[], None]] = SimpleQueue()
@@ -181,6 +182,7 @@ class AcademicClipboardApp:
             x = max(0, (self.root.winfo_screenwidth() - width) // 2)
             y = max(0, (self.root.winfo_screenheight() - height) // 2)
         self.root.geometry(f"{width}x{height}+{x}+{y}")
+        self._show_detail()
 
     def toggle_window_mode(self) -> None:
         self.settings.compact_mode = not self.settings.compact_mode
@@ -277,10 +279,12 @@ class AcademicClipboardApp:
     def _show_detail(self, _event: object | None = None) -> None:
         identifiers = self._selected_ids()
         if not identifiers:
+            self._hide_compact_preview()
             self.detail_title.configure(text="Select an item / 选择一项")
             self.detail_meta.configure(text="")
             body = ""
         elif len(identifiers) > 1:
+            self._hide_compact_preview()
             self.detail_title.configure(
                 text=f"{len(identifiers)} items selected / 已选择 {len(identifiers)} 项"
             )
@@ -296,10 +300,43 @@ class AcademicClipboardApp:
                 + (f" · tags: {item.tags}" if item.tags else "")
             )
             if item.kind == "image":
-                self._show_image_detail(item)
+                if self.settings.compact_mode:
+                    self._show_compact_preview(item)
+                else:
+                    self._hide_compact_preview()
+                    self._show_image_detail(item)
                 return
+            self._hide_compact_preview()
             body = item.content
         self._show_text_detail(body)
+
+    def _hide_compact_preview(self) -> None:
+        self.compact_preview_card.place_forget()
+        self.compact_photo = None
+
+    def _show_compact_preview(self, item: ClipboardItem) -> None:
+        media_file = self.store.media_file(item)
+        if media_file is None or not media_file.exists():
+            self.compact_photo = None
+            self.compact_preview_image.configure(image="", text="图片不存在", width=18, height=5)
+        else:
+            try:
+                with Image.open(media_file) as source:
+                    preview = source.copy()
+                preview.thumbnail((156, 96), Image.Resampling.LANCZOS)
+                self.compact_photo = ImageTk.PhotoImage(preview)
+                self.compact_preview_image.configure(
+                    image=self.compact_photo,
+                    text="",
+                    width=preview.width,
+                    height=preview.height,
+                )
+            except OSError:
+                self.compact_photo = None
+                self.compact_preview_image.configure(image="", text="无法预览", width=18, height=5)
+        self.compact_preview_caption.configure(text=f"{item.width}×{item.height} · 双击复制")
+        self.compact_preview_card.place(relx=1.0, rely=1.0, x=-8, y=-8, anchor="se")
+        self.compact_preview_card.lift()
 
     def _show_text_detail(self, body: str) -> None:
         self.detail_photo = None
@@ -357,10 +394,16 @@ class AcademicClipboardApp:
         return True
 
     def _capture_image(self, image: ClipboardImage, force: bool = False) -> bool:
-        self.store.add_image(image.png_bytes, image.width, image.height)
+        item = self.store.add_image(image.png_bytes, image.width, image.height)
         self.store.prune(self.settings.max_items, self.settings.retention_days)
         if force or not self.search_var.get():
             self.refresh()
+            identifier = str(item.id)
+            if self.tree.exists(identifier):
+                self.tree.selection_set(identifier)
+                self.tree.focus(identifier)
+                self.tree.see(identifier)
+                self._show_detail()
         self.status_var.set(
             f"Captured image {image.width}×{image.height} / 已保存图片 {image.width}×{image.height}"
         )
@@ -499,6 +542,13 @@ class AcademicClipboardApp:
                 insertbackground=self.palette.text,
                 selectbackground=self.palette.selection,
             )
+            self.compact_preview_card.configure(
+                background=self.palette.surface,
+                highlightbackground=self.palette.border,
+            )
+            for widget in (self.compact_preview_image, self.compact_preview_caption):
+                widget.configure(background=self.palette.surface)
+            self.compact_preview_caption.configure(foreground=self.palette.muted)
         if self.settings.global_hotkey != previous_hotkey:
             self._restart_hotkey()
         self.store.prune(self.settings.max_items, self.settings.retention_days)

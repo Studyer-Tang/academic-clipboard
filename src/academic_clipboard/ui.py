@@ -103,6 +103,36 @@ def build_ui(app: Any) -> None:
         justify="center",
     )
 
+    app.compact_preview_card = tk.Frame(
+        app.list_frame,
+        background=app.palette.surface,
+        highlightbackground=app.palette.border,
+        highlightthickness=1,
+        padx=4,
+        pady=4,
+    )
+    app.compact_preview_image = tk.Label(
+        app.compact_preview_card,
+        background=app.palette.surface,
+        borderwidth=0,
+        cursor="hand2",
+    )
+    app.compact_preview_image.pack()
+    app.compact_preview_caption = tk.Label(
+        app.compact_preview_card,
+        background=app.palette.surface,
+        foreground=app.palette.muted,
+        font=("Segoe UI", 8),
+        cursor="hand2",
+    )
+    app.compact_preview_caption.pack(fill="x", pady=(3, 0))
+    for widget in (
+        app.compact_preview_card,
+        app.compact_preview_image,
+        app.compact_preview_caption,
+    ):
+        widget.bind("<Double-1>", lambda _event: app.copy_selected(normalized=False))
+
     app.context_menu = tk.Menu(app.root, tearoff=False)
     app.context_menu.add_command(label="Copy / 复制", command=lambda: app.copy_selected(False))
     app.context_menu.add_command(label="Copy formatted / 复制格式化", command=lambda: app.copy_selected(True))
