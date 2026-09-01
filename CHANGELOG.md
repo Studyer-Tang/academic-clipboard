@@ -7,6 +7,7 @@ All notable changes will be documented here.
 - Added an in-place screenshot thumbnail card to the compact floating window.
 - Automatically selects and previews a newly captured screenshot without expanding the window.
 - Added double-click copy directly from the compact thumbnail.
+- Normalized opaque image color modes so copy-back and restart cannot create a duplicate screenshot.
 
 ## 0.3.0 - 2026-09-01
 

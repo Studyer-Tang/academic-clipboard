@@ -21,8 +21,9 @@ class ClipboardImage:
 
 def encode_png(image: Image.Image) -> ClipboardImage:
     """Convert a clipboard bitmap to a deterministic, portable PNG payload."""
-    target_mode = "RGBA" if "A" in image.getbands() else "RGB"
-    normalized = image.convert(target_mode)
+    # A Windows DIB round-trip can drop an opaque alpha channel. Always using
+    # RGBA keeps the same visible screenshot stable across capture and copy-back.
+    normalized = image.convert("RGBA")
     output = io.BytesIO()
     normalized.save(output, format="PNG")
     payload = output.getvalue()

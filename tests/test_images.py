@@ -17,6 +17,11 @@ class ImageClipboardTests(unittest.TestCase):
         self.assertEqual(first.png_bytes, second.png_bytes)
         self.assertEqual(first.digest, second.digest)
 
+    def test_opaque_rgb_and_rgba_images_have_the_same_digest(self) -> None:
+        rgb = Image.new("RGB", (17, 9), (10, 20, 30))
+        rgba = Image.new("RGBA", (17, 9), (10, 20, 30, 255))
+        self.assertEqual(encode_png(rgb).digest, encode_png(rgba).digest)
+
     @patch("academic_clipboard.images.ImageGrab.grabclipboard")
     def test_read_clipboard_image_ignores_copied_files(self, grabclipboard) -> None:
         grabclipboard.return_value = [Path("paper.pdf")]
