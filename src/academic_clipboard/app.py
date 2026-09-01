@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import time
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
 from queue import Empty, SimpleQueue
 from tkinter import filedialog, messagebox
 
+from PIL import Image, ImageTk
+
 from academic_clipboard.dialogs import edit_item, edit_settings, show_shortcuts
 from academic_clipboard.hotkeys import GlobalHotkey, parse_hotkey
+from academic_clipboard.images import ClipboardImage, copy_image_to_clipboard, read_clipboard_image
 from academic_clipboard.models import ClipboardItem
 from academic_clipboard.privacy import sensitive_reason
 from academic_clipboard.settings import Settings, application_dir
@@ -32,6 +36,9 @@ class AcademicClipboardApp:
         self.settings_path = settings_path
         self.capture_enabled = True
         self.last_clipboard = ""
+        self.last_image_hash = ""
+        self.ignore_image_until = 0.0
+        self.detail_photo: ImageTk.PhotoImage | None = None
         self.items: dict[int, ClipboardItem] = {}
         self.search_after: str | None = None
         self.ui_actions: SimpleQueue[Callable[[], None]] = SimpleQueue()
@@ -244,6 +251,8 @@ class AcademicClipboardApp:
             self.empty_label.place(relx=0.5, rely=0.48, anchor="center")
         for item in rows:
             preview = " ".join((item.title or item.content).split())
+            if item.kind == "image":
+                preview = f"{preview} · {item.width}×{item.height}"
             if len(preview) > 90:
                 preview = preview[:89] + "…"
             captured = item.created_at.replace("T", " ")[:19]
@@ -286,11 +295,41 @@ class AcademicClipboardApp:
                 text=f"{item.kind}/{item.subtype} · {item.created_at} · copied {item.copy_count} time(s)"
                 + (f" · tags: {item.tags}" if item.tags else "")
             )
+            if item.kind == "image":
+                self._show_image_detail(item)
+                return
             body = item.content
+        self._show_text_detail(body)
+
+    def _show_text_detail(self, body: str) -> None:
+        self.detail_photo = None
+        self.detail_image.pack_forget()
+        if not self.detail_text.winfo_manager():
+            self.detail_text.pack(side="left", fill="both", expand=True)
+            self.detail_scroll.pack(side="right", fill="y")
         self.detail_text.configure(state="normal")
         self.detail_text.delete("1.0", "end")
         self.detail_text.insert("1.0", body)
         self.detail_text.configure(state="disabled")
+
+    def _show_image_detail(self, item: ClipboardItem) -> None:
+        self.detail_text.pack_forget()
+        self.detail_scroll.pack_forget()
+        media_file = self.store.media_file(item)
+        if media_file is None or not media_file.exists():
+            self.detail_photo = None
+            self.detail_image.configure(image="", text="Image file missing / 图片文件不存在")
+        else:
+            try:
+                with Image.open(media_file) as source:
+                    preview = source.copy()
+                preview.thumbnail((420, 480), Image.Resampling.LANCZOS)
+                self.detail_photo = ImageTk.PhotoImage(preview)
+                self.detail_image.configure(image=self.detail_photo, text="")
+            except OSError:
+                self.detail_photo = None
+                self.detail_image.configure(image="", text="Cannot preview image / 无法预览图片")
+        self.detail_image.pack(fill="both", expand=True)
 
     def _read_clipboard(self) -> str:
         try:
@@ -317,21 +356,52 @@ class AcademicClipboardApp:
         self.status_var.set(f"Captured {item.kind}/{item.subtype} / 已保存 {item.kind}/{item.subtype}")
         return True
 
+    def _capture_image(self, image: ClipboardImage, force: bool = False) -> bool:
+        self.store.add_image(image.png_bytes, image.width, image.height)
+        self.store.prune(self.settings.max_items, self.settings.retention_days)
+        if force or not self.search_var.get():
+            self.refresh()
+        self.status_var.set(
+            f"Captured image {image.width}×{image.height} / 已保存图片 {image.width}×{image.height}"
+        )
+        return True
+
     def _poll_clipboard(self) -> None:
         value = self._read_clipboard()
-        if self.capture_enabled and value and value != self.last_clipboard:
-            self.last_clipboard = value
-            self._capture(value)
-        elif value:
-            self.last_clipboard = value
+        if value:
+            self.last_image_hash = ""
+            if self.capture_enabled and value != self.last_clipboard:
+                self.last_clipboard = value
+                self._capture(value)
+            else:
+                self.last_clipboard = value
+        else:
+            image = read_clipboard_image()
+            if image is not None:
+                self.last_clipboard = ""
+                is_own_copy = time.monotonic() < self.ignore_image_until
+                if self.capture_enabled and not is_own_copy and image.digest != self.last_image_hash:
+                    self.last_image_hash = image.digest
+                    self._capture_image(image)
+                else:
+                    self.last_image_hash = image.digest
+                self.ignore_image_until = 0.0
         self.root.after(self.settings.poll_milliseconds, self._poll_clipboard)
 
     def capture_now(self) -> None:
         value = self._read_clipboard()
-        if not value.strip():
-            self.status_var.set("No storable text in clipboard / 剪贴板中没有可保存文本")
+        if value.strip():
+            self.last_clipboard = value
+            self.last_image_hash = ""
+            self._capture(value, force=True)
             return
-        self._capture(value, force=True)
+        image = read_clipboard_image()
+        if image is not None:
+            self.last_clipboard = ""
+            self.last_image_hash = image.digest
+            self._capture_image(image, force=True)
+            return
+        self.status_var.set("No storable text or image / 剪贴板中没有可保存的文本或图片")
 
     def _set_clipboard(self, value: str) -> None:
         self.last_clipboard = value
@@ -344,6 +414,29 @@ class AcademicClipboardApp:
         items = self.store.get_many(identifiers)
         if not items:
             self.status_var.set("Select one or more items first / 请先选择一项或多项")
+            return
+        image_items = [item for item in items if item.kind == "image"]
+        if image_items:
+            if len(items) != 1:
+                self.status_var.set("Copy one image at a time / 图片需单独复制")
+                return
+            media_file = self.store.media_file(image_items[0])
+            if media_file is None or not media_file.exists():
+                self.status_var.set("Image file missing / 图片文件不存在")
+                return
+            try:
+                copy_image_to_clipboard(media_file)
+            except (OSError, MemoryError) as error:
+                self.status_var.set(f"Could not copy image: {error} / 图片复制失败")
+                return
+            self.last_clipboard = ""
+            self.last_image_hash = Path(image_items[0].media_path).stem
+            self.ignore_image_until = time.monotonic() + 2.0
+            self.store.mark_copied(identifiers)
+            self.refresh()
+            self.status_var.set("Image copied / 图片已复制")
+            if self.settings.auto_hide_after_copy and self.tray is not None:
+                self.root.after(90, self.hide_window)
             return
         parts = [item.normalized_content if normalized else item.content for item in items]
         combined = self.settings.join_separator.join(parts)
@@ -361,6 +454,9 @@ class AcademicClipboardApp:
             self.status_var.set("Select exactly one item to edit / 请选择一项进行编辑")
             return "break"
         item = self.items.get(identifiers[0]) or self.store.get_many(identifiers)[0]
+        if item.kind == "image":
+            self.status_var.set("Image editing is not supported / 图片记录暂不支持编辑")
+            return "break"
         result = edit_item(self.root, item, self.palette)
         if result is None:
             return "break"

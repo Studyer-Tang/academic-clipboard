@@ -2,6 +2,14 @@
 
 All notable changes will be documented here.
 
+## 0.3.0 - 2026-09-01
+
+- Added automatic Windows screenshot and image clipboard capture.
+- Added persistent, deduplicated local PNG storage and expanded-view image previews.
+- Added copying saved images back to the Windows clipboard.
+- Added transparent database migration and synchronized image cleanup on delete, clear, and prune.
+- Added image filtering and image metadata to JSON and Markdown exports.
+
 ## 0.2.0 - 2026-08-31
 
 - Fixed compact-window actions at high Windows display scaling with a responsive grid layout.

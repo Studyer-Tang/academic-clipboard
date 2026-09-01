@@ -24,3 +24,6 @@ class ClipboardItem:
     copy_count: int
     pinned: bool
     tags: str = ""
+    media_path: str = ""
+    width: int = 0
+    height: int = 0

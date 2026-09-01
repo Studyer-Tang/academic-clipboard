@@ -4,9 +4,10 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any
 
-KINDS = ("all", "doi", "bibtex", "url", "code", "title", "text")
+KINDS = ("all", "image", "doi", "bibtex", "url", "code", "title", "text")
 KIND_LABELS = {
     "all": "All / 全部",
+    "image": "Image / 图片",
     "doi": "DOI",
     "bibtex": "BibTeX",
     "url": "URL",
@@ -15,6 +16,7 @@ KIND_LABELS = {
     "text": "Text / 文本",
 }
 KIND_DISPLAY = {
+    "image": "IMAGE",
     "doi": "DOI",
     "bibtex": "BIB",
     "url": "LINK",
@@ -96,7 +98,7 @@ def build_ui(app: Any) -> None:
     app.tree.bind("<Button-3>", app._show_context_menu)
     app.empty_label = ttk.Label(
         app.list_frame,
-        text="Nothing captured yet\n复制 DOI、标题、代码或网址即可开始",
+        text="Nothing captured yet\n复制截图、DOI、标题、代码或网址即可开始",
         style="Muted.TLabel",
         justify="center",
     )
@@ -123,10 +125,11 @@ def build_ui(app: Any) -> None:
         wraplength=390,
     )
     app.detail_meta.pack(fill="x", pady=(4, 8))
-    text_wrap = ttk.Frame(app.detail_frame)
-    text_wrap.pack(fill="both", expand=True)
+    app.detail_body = ttk.Frame(app.detail_frame)
+    app.detail_body.pack(fill="both", expand=True)
+    app.detail_image = ttk.Label(app.detail_body, anchor="center")
     app.detail_text = tk.Text(
-        text_wrap,
+        app.detail_body,
         wrap="word",
         undo=False,
         font=("Cascadia Mono", 10),
@@ -139,10 +142,10 @@ def build_ui(app: Any) -> None:
         insertbackground=app.palette.text,
         selectbackground=app.palette.selection,
     )
-    detail_scroll = ttk.Scrollbar(text_wrap, orient="vertical", command=app.detail_text.yview)
-    app.detail_text.configure(yscrollcommand=detail_scroll.set)
+    app.detail_scroll = ttk.Scrollbar(app.detail_body, orient="vertical", command=app.detail_text.yview)
+    app.detail_text.configure(yscrollcommand=app.detail_scroll.set)
     app.detail_text.pack(side="left", fill="both", expand=True)
-    detail_scroll.pack(side="right", fill="y")
+    app.detail_scroll.pack(side="right", fill="y")
     app.detail_text.configure(state="disabled")
 
     quick_actions = ttk.Frame(outer)

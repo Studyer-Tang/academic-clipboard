@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     copy_count INTEGER NOT NULL DEFAULT 1,
     pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
     tags TEXT NOT NULL DEFAULT '',
-    custom_title INTEGER NOT NULL DEFAULT 0 CHECK (custom_title IN (0, 1))
+    custom_title INTEGER NOT NULL DEFAULT 0 CHECK (custom_title IN (0, 1)),
+    media_path TEXT NOT NULL DEFAULT '',
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_items(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_kind ON clipboard_items(kind);
@@ -50,12 +53,16 @@ def _item(row: sqlite3.Row) -> ClipboardItem:
         copy_count=row["copy_count"],
         pinned=bool(row["pinned"]),
         tags=row["tags"],
+        media_path=row["media_path"],
+        width=row["width"],
+        height=row["height"],
     )
 
 
 class ClipboardStore:
     def __init__(self, path: Path):
         self.path = path
+        self.images_dir = path.parent / "images"
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connection() as connection:
             connection.executescript(SCHEMA)
@@ -68,6 +75,13 @@ class ClipboardStore:
                 connection.execute(
                     "ALTER TABLE clipboard_items ADD COLUMN custom_title INTEGER NOT NULL DEFAULT 0"
                 )
+            for name, definition in (
+                ("media_path", "TEXT NOT NULL DEFAULT ''"),
+                ("width", "INTEGER NOT NULL DEFAULT 0"),
+                ("height", "INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE clipboard_items ADD COLUMN {name} {definition}")
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -120,6 +134,66 @@ class ClipboardStore:
         assert row is not None
         return _item(row)
 
+    def add_image(self, png_bytes: bytes, width: int, height: int) -> ClipboardItem:
+        if not png_bytes or width < 1 or height < 1:
+            raise ValueError("image data and dimensions must be valid")
+        digest = hashlib.sha256(png_bytes).hexdigest()
+        content_hash = f"image:{digest}"
+        relative_path = Path("images") / f"{digest}.png"
+        media_path = self.path.parent / relative_path
+        self.images_dir.mkdir(parents=True, exist_ok=True)
+        if not media_path.exists():
+            media_path.write_bytes(png_bytes)
+        now = _now()
+        description = f"[Image {width}×{height}]"
+        try:
+            with self._connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO clipboard_items
+                        (content, content_hash, normalized_content, kind, subtype, title, created_at,
+                         media_path, width, height)
+                    VALUES (?, ?, ?, 'image', 'screenshot', 'Screenshot / 截图', ?, ?, ?, ?)
+                    ON CONFLICT(content_hash) DO UPDATE SET
+                        created_at = excluded.created_at,
+                        copy_count = clipboard_items.copy_count + 1,
+                        media_path = excluded.media_path,
+                        width = excluded.width,
+                        height = excluded.height
+                    """,
+                    (
+                        description,
+                        content_hash,
+                        description,
+                        now,
+                        relative_path.as_posix(),
+                        width,
+                        height,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM clipboard_items WHERE content_hash = ?", (content_hash,)
+                ).fetchone()
+        except Exception:
+            with self._connection() as connection:
+                referenced = connection.execute(
+                    "SELECT 1 FROM clipboard_items WHERE media_path = ?", (relative_path.as_posix(),)
+                ).fetchone()
+            if referenced is None:
+                media_path.unlink(missing_ok=True)
+            raise
+        assert row is not None
+        return _item(row)
+
+    def media_file(self, item: ClipboardItem) -> Path | None:
+        if item.kind != "image" or not item.media_path:
+            return None
+        base = self.images_dir.resolve()
+        candidate = (self.path.parent / item.media_path).resolve()
+        if not candidate.is_relative_to(base):
+            raise ValueError("image path points outside the local media directory")
+        return candidate
+
     def list_items(self, search: str = "", kind: str = "all", limit: int = 500) -> list[ClipboardItem]:
         clauses: list[str] = []
         parameters: list[object] = []
@@ -165,6 +239,9 @@ class ClipboardStore:
             )
 
     def update(self, identifier: int, content: str, title: str, tags: str = "") -> ClipboardItem:
+        existing = self.get_many([identifier])
+        if existing and existing[0].kind == "image":
+            raise ValueError("image items cannot be edited as text")
         clean_content = content.strip()
         if not clean_content:
             raise ValueError("content cannot be empty")
@@ -218,20 +295,36 @@ class ClipboardStore:
             return 0
         placeholders = ",".join("?" for _ in identifiers)
         with self._connection() as connection:
+            media_paths = self._media_paths_for_ids(connection, identifiers)
             cursor = connection.execute(
                 f"DELETE FROM clipboard_items WHERE id IN ({placeholders})",  # noqa: S608
                 identifiers,
             )
+        self._remove_media_files(media_paths)
         return cursor.rowcount
 
     def clear_unpinned(self) -> int:
         with self._connection() as connection:
+            media_paths = [
+                row["media_path"]
+                for row in connection.execute(
+                    "SELECT media_path FROM clipboard_items WHERE pinned = 0 AND media_path != ''"
+                ).fetchall()
+            ]
             cursor = connection.execute("DELETE FROM clipboard_items WHERE pinned = 0")
+        self._remove_media_files(media_paths)
         return cursor.rowcount
 
     def clear_all(self) -> int:
         with self._connection() as connection:
+            media_paths = [
+                row["media_path"]
+                for row in connection.execute(
+                    "SELECT media_path FROM clipboard_items WHERE media_path != ''"
+                ).fetchall()
+            ]
             cursor = connection.execute("DELETE FROM clipboard_items")
+        self._remove_media_files(media_paths)
         return cursor.rowcount
 
     def count(self) -> int:
@@ -243,9 +336,30 @@ class ClipboardStore:
             timespec="seconds"
         )
         with self._connection() as connection:
+            expired_ids = [
+                row["id"]
+                for row in connection.execute(
+                    "SELECT id FROM clipboard_items WHERE pinned = 0 AND created_at < ?", (cutoff,)
+                ).fetchall()
+            ]
+            media_paths = self._media_paths_for_ids(connection, expired_ids)
             expired = connection.execute(
                 "DELETE FROM clipboard_items WHERE pinned = 0 AND created_at < ?", (cutoff,)
             ).rowcount
+            overflow_ids = [
+                row["id"]
+                for row in connection.execute(
+                    """
+                    SELECT id FROM clipboard_items
+                    WHERE pinned = 0 AND id NOT IN (
+                        SELECT id FROM clipboard_items WHERE pinned = 0
+                        ORDER BY created_at DESC LIMIT ?
+                    )
+                    """,
+                    (max(1, max_items),),
+                ).fetchall()
+            ]
+            media_paths.extend(self._media_paths_for_ids(connection, overflow_ids))
             overflow = connection.execute(
                 """
                 DELETE FROM clipboard_items
@@ -255,7 +369,26 @@ class ClipboardStore:
                 """,
                 (max(1, max_items),),
             ).rowcount
+        self._remove_media_files(media_paths)
         return expired + overflow
+
+    def _media_paths_for_ids(self, connection: sqlite3.Connection, identifiers: list[int]) -> list[str]:
+        if not identifiers:
+            return []
+        placeholders = ",".join("?" for _ in identifiers)
+        rows = connection.execute(
+            f"SELECT media_path FROM clipboard_items "  # noqa: S608
+            f"WHERE id IN ({placeholders}) AND media_path != ''",
+            identifiers,
+        ).fetchall()
+        return [row["media_path"] for row in rows]
+
+    def _remove_media_files(self, media_paths: list[str]) -> None:
+        base = self.images_dir.resolve()
+        for relative_path in set(media_paths):
+            candidate = (self.path.parent / relative_path).resolve()
+            if candidate.is_relative_to(base):
+                candidate.unlink(missing_ok=True)
 
     def export_json(self, path: Path) -> None:
         rows = self.list_items(limit=5000)
@@ -272,6 +405,9 @@ class ClipboardStore:
                 "copy_count": item.copy_count,
                 "pinned": item.pinned,
                 "tags": item.tags,
+                "media_path": item.media_path,
+                "width": item.width,
+                "height": item.height,
             }
             for item in rows
         ]
@@ -290,6 +426,14 @@ class ClipboardStore:
                     f"- Captured: {item.created_at}",
                     f"- Pinned: {'yes' if item.pinned else 'no'}",
                     f"- Tags: {item.tags or '-'}",
+                    *(
+                        [
+                            f"- Image: `{item.media_path}`",
+                            f"- Dimensions: {item.width}×{item.height}",
+                        ]
+                        if item.kind == "image"
+                        else []
+                    ),
                     "",
                     item.normalized_content,
                     "",

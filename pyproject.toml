@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "academic-clipboard"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local-first clipboard and research-snippet manager for students and researchers"
 readme = "README.md"
 requires-python = ">=3.10"

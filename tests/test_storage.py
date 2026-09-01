@@ -3,7 +3,10 @@ import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
+from io import BytesIO
 from pathlib import Path
+
+from PIL import Image
 
 from academic_clipboard.storage import ClipboardStore
 
@@ -103,7 +106,64 @@ class StorageTests(unittest.TestCase):
         migrated = ClipboardStore(legacy_path)
         item = migrated.add("10.1000/migrated")
         self.assertEqual(item.tags, "")
+        self.assertEqual(item.media_path, "")
+        self.assertEqual(item.width, 0)
+        self.assertEqual(item.height, 0)
         self.assertEqual(migrated.update(item.id, item.content, item.title, "legacy").tags, "legacy")
+
+    def image_bytes(self, color: str = "navy") -> bytes:
+        output = BytesIO()
+        Image.new("RGB", (32, 18), color).save(output, format="PNG")
+        return output.getvalue()
+
+    def test_add_image_persists_and_deduplicates(self) -> None:
+        first = self.store.add_image(self.image_bytes(), 32, 18)
+        second = self.store.add_image(self.image_bytes(), 32, 18)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(second.kind, "image")
+        self.assertEqual(second.subtype, "screenshot")
+        self.assertEqual((second.width, second.height), (32, 18))
+        self.assertEqual(second.copy_count, 2)
+        media_file = self.store.media_file(second)
+        self.assertIsNotNone(media_file)
+        assert media_file is not None
+        self.assertTrue(media_file.exists())
+
+    def test_deleting_and_clearing_images_removes_local_files(self) -> None:
+        deleted = self.store.add_image(self.image_bytes("red"), 32, 18)
+        deleted_file = self.store.media_file(deleted)
+        self.store.delete([deleted.id])
+        assert deleted_file is not None
+        self.assertFalse(deleted_file.exists())
+
+        cleared = self.store.add_image(self.image_bytes("green"), 32, 18)
+        cleared_file = self.store.media_file(cleared)
+        self.store.clear_all()
+        assert cleared_file is not None
+        self.assertFalse(cleared_file.exists())
+
+    def test_pruning_images_removes_only_discarded_files(self) -> None:
+        first = self.store.add_image(self.image_bytes("purple"), 32, 18)
+        second = self.store.add_image(self.image_bytes("orange"), 32, 18)
+        files = {self.store.media_file(first), self.store.media_file(second)}
+        self.assertEqual(self.store.prune(max_items=1, retention_days=365), 1)
+        self.assertEqual(sum(bool(path and path.exists()) for path in files), 1)
+        remaining = self.store.list_items(kind="image")
+        self.assertEqual(len(remaining), 1)
+        self.assertTrue(self.store.media_file(remaining[0]).exists())
+
+    def test_image_export_contains_local_metadata(self) -> None:
+        item = self.store.add_image(self.image_bytes(), 32, 18)
+        json_path = self.root / "images.json"
+        markdown_path = self.root / "images.md"
+        self.store.export_json(json_path)
+        self.store.export_markdown(markdown_path)
+        payload = json.loads(json_path.read_text(encoding="utf-8"))[0]
+        self.assertEqual(payload["media_path"], item.media_path)
+        self.assertEqual(payload["width"], 32)
+        markdown = markdown_path.read_text(encoding="utf-8")
+        self.assertIn("Dimensions: 32×18", markdown)
+        self.assertIn(item.media_path, markdown)
 
 
 if __name__ == "__main__":

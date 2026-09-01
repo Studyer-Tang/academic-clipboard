@@ -11,6 +11,7 @@ dist/
 *.db
 *.db-shm
 *.db-wal
+images/
 .DS_Store
 .coverage
 settings.json
