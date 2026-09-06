@@ -1,22 +1,25 @@
 # Academic Clipboard
 
-面向学生、研究者和开发者的本地优先剪贴板历史与研究片段管理器。它会连续保存文本和截图剪贴板内容，让你选择历史记录，再粘贴到 Word、Markdown 编辑器、浏览器或代码编辑器。
+面向学生和研究者的本地优先科研剪贴板。按下快捷键即可找回刚复制的内容，并根据 DOI、BibTeX、公式、表格、论文标题等类型，直接转换成适合论文与笔记的格式。
 
 A local-first clipboard history and research-snippet manager for students, researchers, and developers. Capture text and screenshots continuously, preview them locally, and copy them back when needed.
 
 ## 功能 / Features
 
+- 低噪声的快捷抽屉：默认只显示搜索、历史记录和“复制 / 转换 / 更多”三个动作，界面语言自动跟随系统。
 - 文本与截图剪贴板历史、搜索、类型筛选、置顶和删除；文本支持批量复制。
 - Windows 截图自动保存为本地 PNG；悬浮小窗选中截图即显示缩略图，无需展开，并可把任一历史截图重新复制到其他软件。
 - 默认以 390×380 的屏幕右侧置顶悬浮窗启动，还可继续手动缩小，阅读时不遮挡主要内容，并可一键展开完整详情。
 - 高 DPI 响应式布局，在常见 Windows 缩放比例下保持操作栏可见。
 - `Ctrl+Alt+V` 全局唤出，方向键选择、Enter 复制，数字 `1–9` 快速复制最近条目。
-- 编辑标题、内容和标签；搜索会同时匹配标签。
+- 为论文片段记录研究项目、来源、页码/章节、标签和个人批注；这些字段均可检索和导出。
 - 跟随系统、浅色和深色三种主题，以及应用内设置窗口。
 - 多选记录按顺序合并；原文和智能格式化结果可分别复制。
 - DOI 自动识别并转换为 Markdown 链接。
-- BibTeX 自动整理缩进与字段格式。
+- BibTeX 自动整理，并从已有字段生成可校对的 GB/T 7714 与 APA 风格参考文献草稿。
 - 论文标题生成 Markdown 阅读笔记模板。
+- 制表符或 Markdown 表格可转换为规范 Markdown 表格与 LaTeX `tabular`。
+- LaTeX 公式可在行内与独立公式格式之间转换。
 - Python、JavaScript、SQL、Shell、JSON 等代码自动保存为 fenced snippet。
 - URL 自动分类为论文、文档、数据集、GitHub/GitLab 仓库或普通网页。
 - 默认跳过疑似密码、Token、私钥、Authorization header 和验证码。
@@ -24,6 +27,8 @@ A local-first clipboard history and research-snippet manager for students, resea
 - 中英双语界面；Windows 优先，同时保留 macOS/Linux 的 Tkinter 基础兼容性。
 
 ## 快速开始 / Quick start
+
+Windows 用户可从 [Releases](https://github.com/Studyer-Tang/academic-clipboard/releases) 下载最新版 `AcademicClipboard.exe`。程序为便携版，双击即可运行，无需安装。
 
 需要 Python 3.10 或更新版本，并包含标准库 Tkinter/Tcl-Tk。建议 Windows 用户从 [python.org](https://www.python.org/downloads/) 安装标准版 Python。Windows PowerShell：
 
@@ -117,11 +122,12 @@ academic-clipboard --database .\demo.db list
 ## 当前边界 / Current limits
 
 - 图片剪贴板与图片回写目前以 Windows 为主要支持平台；复制的普通文件不会被当成截图保存。
-- 图片记录可预览、置顶、搜索和单张复制，暂不支持图片编辑或与文本混合批量复制。
+- 图片记录可添加标题、来源、图号、研究项目和批注，但暂不提供像素编辑，也不能与文本混合批量复制。
 - 当前支持 Windows 系统托盘；macOS/Linux 的托盘行为取决于桌面环境。
 - 全局快捷键目前仅在 Windows 提供；其他系统可通过托盘图标显示窗口。
-- 标题、代码语言与 URL 类别使用本地规则推断，可在编辑窗口中人工修正标题和标签。
-- 不联网查询 DOI 元数据，也不会自动访问论文网页。
+- 标题、公式、表格、代码语言与 URL 类别使用本地规则推断，可在整理窗口中人工修正内容和研究上下文。
+- GB/T 7714 和 APA 输出只使用剪贴板中已有的 BibTeX 字段，因此定位为“待校对草稿”，不会虚构缺失元数据。
+- 不联网查询 DOI 元数据，也不会自动访问论文网页；未来的元数据查询仍将保持明确选择后才联网。
 
 ## 开发 / Development
 
@@ -137,12 +143,13 @@ python -m venv .venv
 
 ## Roadmap
 
-- v0.4：可选 DOI 元数据、系统密钥保护和文件历史导入策略。
-- v1.0：稳定的数据迁移、无障碍改进、签名桌面安装包。
+- v0.5：可选 Crossref/arXiv 元数据、项目批量引用导出和更强的全文检索。
+- v0.6：可选 Zotero、Obsidian 与 Word 工作流；公式和截图 OCR 仍须显式启用。
+- v1.0：稳定的数据迁移、无障碍改进、签名桌面安装包和自动更新。
 
 ## Windows portable build
 
-仓库包含 `Windows portable app` GitHub Actions 工作流。手动运行该工作流或推送 `v*` 标签后，会生成无需终端的 `AcademicClipboard.exe` 构建产物。开发者也可安装 `.[packaging]` 后使用相同的 PyInstaller 参数本地构建。
+仓库包含 `Windows portable app` GitHub Actions 工作流。手动运行可获得测试构建；推送 `v*` 标签会自动创建正式 GitHub Release，并附带 `AcademicClipboard.exe` 与 SHA-256 校验文件。开发者也可安装 `.[packaging]` 后使用相同的 PyInstaller 参数本地构建。
 
 ## License
 

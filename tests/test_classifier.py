@@ -38,6 +38,13 @@ class ClassifierTests(unittest.TestCase):
         paragraph = classify("This is a complete sentence about a result.")
         self.assertEqual((paragraph.kind, paragraph.subtype), ("text", "plain"))
 
+    def test_formula_and_table(self) -> None:
+        formula = classify(r"\frac{\beta_1}{\sqrt{n}}")
+        self.assertEqual((formula.kind, formula.subtype), ("formula", "latex"))
+        table = classify("Variable\tMean\nTreatment\t1.25")
+        self.assertEqual((table.kind, table.subtype), ("table", "tab-separated"))
+        self.assertIn("| Variable | Mean |", table.normalized_content)
+
 
 if __name__ == "__main__":
     unittest.main()

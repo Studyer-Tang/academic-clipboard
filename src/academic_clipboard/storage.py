@@ -28,7 +28,11 @@ CREATE TABLE IF NOT EXISTS clipboard_items (
     custom_title INTEGER NOT NULL DEFAULT 0 CHECK (custom_title IN (0, 1)),
     media_path TEXT NOT NULL DEFAULT '',
     width INTEGER NOT NULL DEFAULT 0,
-    height INTEGER NOT NULL DEFAULT 0
+    height INTEGER NOT NULL DEFAULT 0,
+    source TEXT NOT NULL DEFAULT '',
+    locator TEXT NOT NULL DEFAULT '',
+    project TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_items(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_clipboard_kind ON clipboard_items(kind);
@@ -56,6 +60,10 @@ def _item(row: sqlite3.Row) -> ClipboardItem:
         media_path=row["media_path"],
         width=row["width"],
         height=row["height"],
+        source=row["source"],
+        locator=row["locator"],
+        project=row["project"],
+        note=row["note"],
     )
 
 
@@ -79,6 +87,10 @@ class ClipboardStore:
                 ("media_path", "TEXT NOT NULL DEFAULT ''"),
                 ("width", "INTEGER NOT NULL DEFAULT 0"),
                 ("height", "INTEGER NOT NULL DEFAULT 0"),
+                ("source", "TEXT NOT NULL DEFAULT ''"),
+                ("locator", "TEXT NOT NULL DEFAULT ''"),
+                ("project", "TEXT NOT NULL DEFAULT ''"),
+                ("note", "TEXT NOT NULL DEFAULT ''"),
             ):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE clipboard_items ADD COLUMN {name} {definition}")
@@ -199,10 +211,11 @@ class ClipboardStore:
         parameters: list[object] = []
         if search.strip():
             clauses.append(
-                "(content LIKE ? OR normalized_content LIKE ? OR title LIKE ? OR subtype LIKE ? OR tags LIKE ?)"
+                "(content LIKE ? OR normalized_content LIKE ? OR title LIKE ? OR subtype LIKE ? "
+                "OR tags LIKE ? OR source LIKE ? OR locator LIKE ? OR project LIKE ? OR note LIKE ?)"
             )
             term = f"%{search.strip()}%"
-            parameters.extend([term, term, term, term, term])
+            parameters.extend([term] * 9)
         if kind and kind != "all":
             clauses.append("kind = ?")
             parameters.append(kind)
@@ -238,7 +251,17 @@ class ClipboardStore:
                 [_now(), *identifiers],
             )
 
-    def update(self, identifier: int, content: str, title: str, tags: str = "") -> ClipboardItem:
+    def update(
+        self,
+        identifier: int,
+        content: str,
+        title: str,
+        tags: str = "",
+        source: str = "",
+        locator: str = "",
+        project: str = "",
+        note: str = "",
+    ) -> ClipboardItem:
         existing = self.get_many([identifier])
         if existing and existing[0].kind == "image":
             raise ValueError("image items cannot be edited as text")
@@ -249,13 +272,18 @@ class ClipboardStore:
         digest = hashlib.sha256(clean_content.encode("utf-8")).hexdigest()
         clean_title = " ".join(title.split()) or detected.title
         clean_tags = ", ".join(dict.fromkeys(tag.strip() for tag in tags.split(",") if tag.strip()))
+        clean_source = " ".join(source.split())
+        clean_locator = " ".join(locator.split())
+        clean_project = " ".join(project.split())
+        clean_note = note.strip()
         try:
             with self._connection() as connection:
                 cursor = connection.execute(
                     """
                     UPDATE clipboard_items SET
                         content = ?, content_hash = ?, normalized_content = ?, kind = ?, subtype = ?,
-                        title = ?, tags = ?, custom_title = 1
+                        title = ?, tags = ?, source = ?, locator = ?, project = ?, note = ?,
+                        custom_title = 1
                     WHERE id = ?
                     """,
                     (
@@ -266,6 +294,10 @@ class ClipboardStore:
                         detected.subtype,
                         clean_title,
                         clean_tags,
+                        clean_source,
+                        clean_locator,
+                        clean_project,
+                        clean_note,
                         identifier,
                     ),
                 )
@@ -276,6 +308,44 @@ class ClipboardStore:
                 ).fetchone()
         except sqlite3.IntegrityError as error:
             raise ValueError("another item already contains the same text") from error
+        assert row is not None
+        return _item(row)
+
+    def update_context(
+        self,
+        identifier: int,
+        title: str,
+        tags: str = "",
+        source: str = "",
+        locator: str = "",
+        project: str = "",
+        note: str = "",
+    ) -> ClipboardItem:
+        """Update research metadata without reclassifying or replacing the captured payload."""
+        clean_title = " ".join(title.split())
+        clean_tags = ", ".join(dict.fromkeys(tag.strip() for tag in tags.split(",") if tag.strip()))
+        with self._connection() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE clipboard_items SET
+                    title = CASE WHEN ? = '' THEN title ELSE ? END,
+                    tags = ?, source = ?, locator = ?, project = ?, note = ?, custom_title = 1
+                WHERE id = ?
+                """,
+                (
+                    clean_title,
+                    clean_title,
+                    clean_tags,
+                    " ".join(source.split()),
+                    " ".join(locator.split()),
+                    " ".join(project.split()),
+                    note.strip(),
+                    identifier,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(identifier)
+            row = connection.execute("SELECT * FROM clipboard_items WHERE id = ?", (identifier,)).fetchone()
         assert row is not None
         return _item(row)
 
@@ -408,6 +478,10 @@ class ClipboardStore:
                 "media_path": item.media_path,
                 "width": item.width,
                 "height": item.height,
+                "source": item.source,
+                "locator": item.locator,
+                "project": item.project,
+                "note": item.note,
             }
             for item in rows
         ]
@@ -426,6 +500,9 @@ class ClipboardStore:
                     f"- Captured: {item.created_at}",
                     f"- Pinned: {'yes' if item.pinned else 'no'}",
                     f"- Tags: {item.tags or '-'}",
+                    f"- Project: {item.project or '-'}",
+                    f"- Source: {item.source or '-'}",
+                    f"- Locator: {item.locator or '-'}",
                     *(
                         [
                             f"- Image: `{item.media_path}`",
@@ -436,6 +513,7 @@ class ClipboardStore:
                     ),
                     "",
                     item.normalized_content,
+                    *(["", f"> Note: {item.note}"] if item.note else []),
                     "",
                 ]
             )

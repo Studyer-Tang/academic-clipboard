@@ -3,6 +3,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from academic_clipboard.i18n import tr
 from academic_clipboard.models import ClipboardItem
 from academic_clipboard.settings import Settings
 from academic_clipboard.theme import Palette
@@ -29,26 +30,49 @@ def _center(dialog: tk.Toplevel, parent: tk.Misc, width: int, height: int) -> No
     dialog.geometry(f"{width}x{height}+{x}+{y}")
 
 
-def edit_item(parent: tk.Misc, item: ClipboardItem, palette: Palette) -> tuple[str, str, str] | None:
+def edit_item(
+    parent: tk.Misc, item: ClipboardItem, palette: Palette
+) -> tuple[str, str, str, str, str, str, str] | None:
     dialog = tk.Toplevel(parent)
-    dialog.title("Edit snippet / 编辑片段")
+    dialog.title(tr("整理研究片段", "Organize research clip"))
     dialog.transient(parent)
     dialog.configure(background=palette.background)
-    dialog.minsize(480, 390)
-    _center(dialog, parent, 620, 480)
+    dialog.minsize(560, 560)
+    _center(dialog, parent, 680, 650)
 
     frame = ttk.Frame(dialog, padding=16)
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="Title / 标题").pack(anchor="w")
+    ttk.Label(frame, text=tr("标题", "Title"), style="Section.TLabel").pack(anchor="w")
     title_var = tk.StringVar(value=item.title)
     title_entry = ttk.Entry(frame, textvariable=title_var)
     title_entry.pack(fill="x", pady=(4, 12))
 
-    ttk.Label(frame, text="Tags / 标签（用逗号分隔）").pack(anchor="w")
-    tags_var = tk.StringVar(value=item.tags)
-    ttk.Entry(frame, textvariable=tags_var).pack(fill="x", pady=(4, 12))
+    context = ttk.Frame(frame)
+    context.pack(fill="x", pady=(0, 12))
+    context.columnconfigure(0, weight=1)
+    context.columnconfigure(1, weight=1)
 
-    ttk.Label(frame, text="Content / 内容").pack(anchor="w")
+    ttk.Label(context, text=tr("研究项目", "Project")).grid(row=0, column=0, sticky="w")
+    ttk.Label(context, text=tr("标签（逗号分隔）", "Tags (comma separated)")).grid(
+        row=0, column=1, sticky="w", padx=(10, 0)
+    )
+    project_var = tk.StringVar(value=item.project)
+    ttk.Entry(context, textvariable=project_var).grid(row=1, column=0, sticky="ew", pady=(4, 9))
+    tags_var = tk.StringVar(value=item.tags)
+    ttk.Entry(context, textvariable=tags_var).grid(row=1, column=1, sticky="ew", padx=(10, 0), pady=(4, 9))
+
+    ttk.Label(context, text=tr("来源（论文、网页或书名）", "Source (paper, page, or book)")).grid(
+        row=2, column=0, sticky="w"
+    )
+    ttk.Label(context, text=tr("定位（页码、章节或图号）", "Locator (page, section, or figure)")).grid(
+        row=2, column=1, sticky="w", padx=(10, 0)
+    )
+    source_var = tk.StringVar(value=item.source)
+    locator_var = tk.StringVar(value=item.locator)
+    ttk.Entry(context, textvariable=source_var).grid(row=3, column=0, sticky="ew", pady=(4, 0))
+    ttk.Entry(context, textvariable=locator_var).grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(4, 0))
+
+    ttk.Label(frame, text=tr("原文", "Content"), style="Section.TLabel").pack(anchor="w")
     content = tk.Text(
         frame,
         wrap="word",
@@ -64,24 +88,55 @@ def edit_item(parent: tk.Misc, item: ClipboardItem, palette: Palette) -> tuple[s
         pady=9,
     )
     content.insert("1.0", item.content)
-    content.pack(fill="both", expand=True, pady=(4, 12))
+    if item.kind == "image":
+        content.configure(state="disabled")
+    content.pack(fill="both", expand=True, pady=(4, 10))
 
-    result: list[tuple[str, str, str]] = []
+    ttk.Label(frame, text=tr("研究批注", "Research note"), style="Section.TLabel").pack(anchor="w")
+    note = tk.Text(
+        frame,
+        wrap="word",
+        height=4,
+        undo=True,
+        font=("Segoe UI", 10),
+        background=palette.surface,
+        foreground=palette.text,
+        insertbackground=palette.text,
+        selectbackground=palette.selection,
+        relief="solid",
+        borderwidth=1,
+        padx=9,
+        pady=7,
+    )
+    note.insert("1.0", item.note)
+    note.pack(fill="x", pady=(4, 12))
+
+    result: list[tuple[str, str, str, str, str, str, str]] = []
 
     def save() -> None:
-        value = content.get("1.0", "end-1c").strip()
+        value = item.content if item.kind == "image" else content.get("1.0", "end-1c").strip()
         if not value:
             messagebox.showerror(
                 "Academic Clipboard", "Content cannot be empty / 内容不能为空", parent=dialog
             )
             return
-        result.append((title_var.get(), tags_var.get(), value))
+        result.append(
+            (
+                title_var.get(),
+                tags_var.get(),
+                value,
+                source_var.get(),
+                locator_var.get(),
+                project_var.get(),
+                note.get("1.0", "end-1c"),
+            )
+        )
         dialog.destroy()
 
     actions = ttk.Frame(frame)
     actions.pack(fill="x")
-    ttk.Button(actions, text="Cancel / 取消", command=dialog.destroy).pack(side="right")
-    ttk.Button(actions, text="Save / 保存", style="Accent.TButton", command=save).pack(
+    ttk.Button(actions, text=tr("取消", "Cancel"), command=dialog.destroy).pack(side="right")
+    ttk.Button(actions, text=tr("保存", "Save"), style="Accent.TButton", command=save).pack(
         side="right", padx=(0, 8)
     )
     dialog.bind("<Control-Return>", lambda _event: save())

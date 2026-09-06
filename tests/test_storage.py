@@ -76,6 +76,27 @@ class StorageTests(unittest.TestCase):
         recaptured = self.store.add("A Useful Research Paper for Editing")
         self.assertEqual(recaptured.title, "My reading note")
 
+    def test_research_context_is_searchable_and_exported(self) -> None:
+        item = self.store.add("A useful excerpt from an empirical paper.")
+        updated = self.store.update(
+            item.id,
+            item.content,
+            "Identification argument",
+            "causal",
+            "Angrist and Pischke",
+            "p. 42",
+            "Labor economics",
+            "Revisit the exclusion restriction.",
+        )
+        self.assertEqual(updated.project, "Labor economics")
+        self.assertEqual(updated.locator, "p. 42")
+        self.assertEqual(self.store.list_items(search="exclusion")[0].id, item.id)
+        destination = self.root / "context.md"
+        self.store.export_markdown(destination)
+        exported = destination.read_text(encoding="utf-8")
+        self.assertIn("Angrist and Pischke", exported)
+        self.assertIn("Revisit the exclusion restriction", exported)
+
     def test_edit_rejects_duplicate_content(self) -> None:
         first = self.store.add("10.1000/first")
         second = self.store.add("10.1000/second")
@@ -109,6 +130,8 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(item.media_path, "")
         self.assertEqual(item.width, 0)
         self.assertEqual(item.height, 0)
+        self.assertEqual(item.project, "")
+        self.assertEqual(item.source, "")
         self.assertEqual(migrated.update(item.id, item.content, item.title, "legacy").tags, "legacy")
 
     def image_bytes(self, color: str = "navy") -> bytes:
@@ -154,6 +177,17 @@ class StorageTests(unittest.TestCase):
 
     def test_image_export_contains_local_metadata(self) -> None:
         item = self.store.add_image(self.image_bytes(), 32, 18)
+        item = self.store.update_context(
+            item.id,
+            "Figure 2",
+            "identification",
+            "A useful paper",
+            "Figure 2",
+            "Causal inference",
+            "Compare the confidence intervals.",
+        )
+        self.assertEqual(item.kind, "image")
+        self.assertEqual(item.project, "Causal inference")
         json_path = self.root / "images.json"
         markdown_path = self.root / "images.md"
         self.store.export_json(json_path)
@@ -164,6 +198,7 @@ class StorageTests(unittest.TestCase):
         markdown = markdown_path.read_text(encoding="utf-8")
         self.assertIn("Dimensions: 32×18", markdown)
         self.assertIn(item.media_path, markdown)
+        self.assertIn("Compare the confidence intervals", markdown)
 
 
 if __name__ == "__main__":

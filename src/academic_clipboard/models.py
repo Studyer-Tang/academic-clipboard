@@ -27,3 +27,7 @@ class ClipboardItem:
     media_path: str = ""
     width: int = 0
     height: int = 0
+    source: str = ""
+    locator: str = ""
+    project: str = ""
+    note: str = ""

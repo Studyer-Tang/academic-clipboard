@@ -8,7 +8,7 @@ Tkinter UI / CLI
 ClipboardStore (SQLite)
        |-- images/ (local PNG files)
        |
-classifier -> formatters
+classifier -> formatters / academic transforms
        |
 privacy filter (before storage)
 ```
@@ -19,6 +19,10 @@ privacy filter (before storage)
 - `images.py` converts clipboard bitmaps to PNG and restores saved images to the Windows clipboard.
 - `classifier.py` performs deterministic, offline classification.
 - `formatters.py` produces reusable Markdown and BibTeX representations.
+- `transforms.py` exposes content-aware copy actions for citations, DOI links, formulae, tables,
+  code, and research notes. Citation drafts only use fields already present in captured BibTeX.
+- Research context (project, source, locator, and note) is stored beside each clip, included in
+  local search, and exported without requiring a separate cloud account.
 - `privacy.py` rejects common secret patterns before the GUI calls storage.
 - `settings.py` resolves per-platform data directories and persists non-secret preferences.
 - `tray.py` owns the generated tray icon and menu; callbacks are queued back onto Tk's UI thread.

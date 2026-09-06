@@ -11,12 +11,14 @@ from PIL import Image, ImageTk
 
 from academic_clipboard.dialogs import edit_item, edit_settings, show_shortcuts
 from academic_clipboard.hotkeys import GlobalHotkey, parse_hotkey
+from academic_clipboard.i18n import tr
 from academic_clipboard.images import ClipboardImage, copy_image_to_clipboard, read_clipboard_image
 from academic_clipboard.models import ClipboardItem
 from academic_clipboard.privacy import sensitive_reason
 from academic_clipboard.settings import Settings, application_dir
 from academic_clipboard.storage import ClipboardStore
 from academic_clipboard.theme import apply_theme
+from academic_clipboard.transforms import available_transforms
 from academic_clipboard.ui import KIND_DISPLAY, KIND_LABELS, build_ui
 
 
@@ -86,13 +88,16 @@ class AcademicClipboardApp:
             )
 
     def _style_context_menu(self) -> None:
-        self.context_menu.configure(
-            background=self.palette.surface,
-            foreground=self.palette.text,
-            activebackground=self.palette.selection,
-            activeforeground=self.palette.text,
-            borderwidth=1,
-        )
+        for menu_name in ("context_menu", "transform_menu"):
+            menu = getattr(self, menu_name, None)
+            if menu is not None:
+                menu.configure(
+                    background=self.palette.surface,
+                    foreground=self.palette.text,
+                    activebackground=self.palette.selection,
+                    activeforeground=self.palette.text,
+                    borderwidth=1,
+                )
 
     def _focus_search(self) -> str:
         self.search_entry.focus_set()
@@ -144,29 +149,81 @@ class AcademicClipboardApp:
             self.context_menu.tk_popup(event.x_root, event.y_root)
         return "break"
 
+    def show_more_menu(self) -> None:
+        self.context_menu.tk_popup(
+            self.more_button.winfo_rootx(),
+            self.more_button.winfo_rooty() + self.more_button.winfo_height(),
+        )
+
+    def show_transform_menu(self) -> None:
+        identifiers = self._selected_ids()
+        if len(identifiers) > 1:
+            self.copy_selected(normalized=True)
+            return
+        if not identifiers:
+            self.status_var.set(tr("请先选择一条记录", "Select an item first"))
+            return
+        item = self.items.get(identifiers[0])
+        if item is None:
+            return
+        if item.kind == "image":
+            self.copy_selected(normalized=False)
+            return
+        self.transform_menu.delete(0, "end")
+        for transform in available_transforms(item):
+            self.transform_menu.add_command(
+                label=transform.label,
+                command=lambda key=transform.key: self.copy_transform(key),
+            )
+        self.transform_menu.tk_popup(
+            self.transform_button.winfo_rootx(),
+            self.transform_button.winfo_rooty() + self.transform_button.winfo_height(),
+        )
+
+    def copy_transform(self, key: str) -> None:
+        identifiers = self._selected_ids()
+        if len(identifiers) != 1:
+            return
+        item = self.items.get(identifiers[0])
+        if item is None:
+            return
+        transform = next(
+            (candidate for candidate in available_transforms(item) if candidate.key == key), None
+        )
+        if transform is None:
+            return
+        self._set_clipboard(transform.value)
+        self.store.mark_copied([item.id])
+        self.status_var.set(tr(f"已复制：{transform.label}", f"Copied: {transform.label}"))
+        if self.settings.auto_hide_after_copy and self.tray is not None:
+            self.hide_window()
+
     def _apply_window_mode(self) -> None:
         compact = self.settings.compact_mode
         detail_is_visible = str(self.detail_frame) in self.pane.panes()
         if compact:
             if detail_is_visible:
                 self.pane.forget(self.detail_frame)
-            self.tree.configure(displaycolumns=("pin", "kind", "preview"))
-            self.tree.column("pin", width=34, stretch=False)
-            self.tree.column("kind", width=72, stretch=False)
+            self.tree.configure(displaycolumns=("pin", "kind", "preview"), show="")
+            self.tree.column("pin", width=28, stretch=False)
+            self.tree.column("kind", width=62, stretch=False)
             self.capture_now_button.pack_forget()
             self.topmost_check.pack_forget()
             self.export_button.pack_forget()
             self.clear_button.pack_forget()
-            self.status_label.configure(wraplength=380)
-            self.mode_button.configure(text="Expand / 展开")
-            width, height = 390, 380
-            self.root.minsize(330, 260)
+            for button in (self.edit_button, self.pin_button, self.delete_button):
+                button.grid_remove()
+            self.more_button.grid_configure(column=2)
+            self.status_label.configure(wraplength=350)
+            self.mode_button.configure(text="↗")
+            width, height = 400, 440
+            self.root.minsize(340, 300)
             x = max(0, self.root.winfo_screenwidth() - width - 24)
             y = 72
         else:
             if not detail_is_visible:
                 self.pane.add(self.detail_frame, weight=2)
-            self.tree.configure(displaycolumns=("pin", "kind", "preview", "copies", "time"))
+            self.tree.configure(displaycolumns=("pin", "kind", "preview", "copies", "time"), show="headings")
             self.tree.column("pin", width=38, stretch=False)
             self.tree.column("kind", width=90, stretch=False)
             if not self.capture_now_button.winfo_manager():
@@ -175,8 +232,12 @@ class AcademicClipboardApp:
                 self.topmost_check.pack(side="right", padx=(8, 0))
                 self.export_button.pack(side="right", padx=(8, 0))
                 self.clear_button.pack(side="right")
+            self.edit_button.grid()
+            self.pin_button.grid()
+            self.delete_button.grid()
+            self.more_button.grid_configure(column=5)
             self.status_label.configure(wraplength=560)
-            self.mode_button.configure(text="Compact / 悬浮")
+            self.mode_button.configure(text="↙")
             width, height = 1060, 680
             self.root.minsize(820, 520)
             x = max(0, (self.root.winfo_screenwidth() - width) // 2)
@@ -253,6 +314,8 @@ class AcademicClipboardApp:
             self.empty_label.place(relx=0.5, rely=0.48, anchor="center")
         for item in rows:
             preview = " ".join((item.title or item.content).split())
+            if item.project:
+                preview = f"{item.project} · {preview}"
             if item.kind == "image":
                 preview = f"{preview} · {item.width}×{item.height}"
             if len(preview) > 90:
@@ -273,32 +336,38 @@ class AcademicClipboardApp:
         remaining = [identifier for identifier in selected if self.tree.exists(identifier)]
         if remaining:
             self.tree.selection_set(remaining)
-        self.status_var.set(f"{len(rows)} items shown / 显示 {len(rows)} 项")
+        self.status_var.set(tr(f"显示 {len(rows)} 项", f"{len(rows)} items"))
         self._show_detail()
 
     def _show_detail(self, _event: object | None = None) -> None:
         identifiers = self._selected_ids()
         if not identifiers:
             self._hide_compact_preview()
-            self.detail_title.configure(text="Select an item / 选择一项")
+            self.detail_title.configure(text=tr("选择一条记录", "Select an item"))
             self.detail_meta.configure(text="")
             body = ""
         elif len(identifiers) > 1:
             self._hide_compact_preview()
             self.detail_title.configure(
-                text=f"{len(identifiers)} items selected / 已选择 {len(identifiers)} 项"
+                text=tr(f"已选择 {len(identifiers)} 项", f"{len(identifiers)} items selected")
             )
-            self.detail_meta.configure(
-                text="Copy them together in the visible list order / 将按当前列表顺序合并复制"
-            )
+            self.detail_meta.configure(text=tr("将按列表顺序合并复制", "Copies in the visible list order"))
             body = self.settings.join_separator.join(self.items[item].content for item in identifiers)
         else:
             item = self.items[identifiers[0]]
             self.detail_title.configure(text=item.title or item.kind)
-            self.detail_meta.configure(
-                text=f"{item.kind}/{item.subtype} · {item.created_at} · copied {item.copy_count} time(s)"
-                + (f" · tags: {item.tags}" if item.tags else "")
-            )
+            metadata = [
+                f"{item.kind}/{item.subtype}",
+                item.created_at,
+                tr(f"使用 {item.copy_count} 次", f"used {item.copy_count} times"),
+            ]
+            if item.project:
+                metadata.append(item.project)
+            if item.source:
+                metadata.append(item.source + (f" · {item.locator}" if item.locator else ""))
+            if item.tags:
+                metadata.append(item.tags)
+            self.detail_meta.configure(text=" · ".join(metadata))
             if item.kind == "image":
                 if self.settings.compact_mode:
                     self._show_compact_preview(item)
@@ -307,7 +376,13 @@ class AcademicClipboardApp:
                     self._show_image_detail(item)
                 return
             self._hide_compact_preview()
-            body = item.content
+            detail_font = (
+                ("Cascadia Mono", 10)
+                if item.kind in {"bibtex", "code", "formula", "table"}
+                else ("Segoe UI", 10)
+            )
+            self.detail_text.configure(font=detail_font)
+            body = item.content + (f"\n\n— {item.note}" if item.note else "")
         self._show_text_detail(body)
 
     def _hide_compact_preview(self) -> None:
@@ -497,15 +572,15 @@ class AcademicClipboardApp:
             self.status_var.set("Select exactly one item to edit / 请选择一项进行编辑")
             return "break"
         item = self.items.get(identifiers[0]) or self.store.get_many(identifiers)[0]
-        if item.kind == "image":
-            self.status_var.set("Image editing is not supported / 图片记录暂不支持编辑")
-            return "break"
         result = edit_item(self.root, item, self.palette)
         if result is None:
             return "break"
-        title, tags, content = result
+        title, tags, content, source, locator, project, note = result
         try:
-            self.store.update(item.id, content, title, tags)
+            if item.kind == "image":
+                self.store.update_context(item.id, title, tags, source, locator, project, note)
+            else:
+                self.store.update(item.id, content, title, tags, source, locator, project, note)
         except ValueError as error:
             messagebox.showerror("Academic Clipboard", str(error), parent=self.root)
             return "break"
@@ -513,7 +588,7 @@ class AcademicClipboardApp:
         self.tree.selection_set(str(item.id))
         self.tree.focus(str(item.id))
         self._show_detail()
-        self.status_var.set("Snippet updated / 片段已更新")
+        self.status_var.set(tr("研究信息已保存", "Research context saved"))
         return "break"
 
     def open_settings(self) -> None:
@@ -536,6 +611,10 @@ class AcademicClipboardApp:
         if self.settings.theme != previous_theme:
             self.palette = apply_theme(self.root, self.settings.theme)
             self._style_context_menu()
+            self.brand_mark.configure(
+                background=self.palette.background,
+                foreground=self.palette.accent if self.capture_enabled else self.palette.muted,
+            )
             self.detail_text.configure(
                 background=self.palette.surface,
                 foreground=self.palette.text,
@@ -599,9 +678,17 @@ class AcademicClipboardApp:
 
     def toggle_capture(self) -> None:
         self.capture_enabled = not self.capture_enabled
-        self.capture_button.configure(text="⏸" if self.capture_enabled else "▶")
+        self.capture_button.configure(text="Ⅱ" if self.capture_enabled else "▶")
+        self.capture_status.configure(
+            text=tr("监听中", "Listening") if self.capture_enabled else tr("已暂停", "Paused")
+        )
+        self.brand_mark.configure(
+            foreground=self.palette.accent if self.capture_enabled else self.palette.muted
+        )
         self.status_var.set(
-            "Capture active / 正在监听" if self.capture_enabled else "Capture paused / 已暂停监听"
+            tr("剪贴板监听已开启", "Clipboard capture is active")
+            if self.capture_enabled
+            else tr("剪贴板监听已暂停", "Clipboard capture is paused")
         )
         if self.tray is not None:
             self.tray.refresh()

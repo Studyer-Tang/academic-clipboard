@@ -2,6 +2,18 @@
 
 All notable changes will be documented here.
 
+## 0.4.0 - 2026-09-06
+
+- Reworked the compact window into a low-noise, single-language research drawer with three primary actions.
+- Added type-specific copy transformations for DOI, BibTeX, URLs, paper titles, code, formulae, tables, and quotations.
+- Added offline GB/T 7714 and APA-style reference drafts derived from captured BibTeX metadata.
+- Added tab-separated and Markdown table recognition with Markdown and LaTeX table output.
+- Added LaTeX formula recognition and inline/display transformations.
+- Added project, source, locator, and research-note fields with automatic migration, search, and export support.
+- Allowed screenshots and figures to carry the same research context without altering their image payload.
+- Replaced the green prototype palette with a neutral research-tool theme and restrained indigo accent.
+- Added checksums and automatic GitHub Release publishing for version tags.
+
 ## 0.3.1 - 2026-09-01
 
 - Added an in-place screenshot thumbnail card to the compact floating window.

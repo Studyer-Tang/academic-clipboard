@@ -20,27 +20,27 @@ class Palette:
 
 
 LIGHT = Palette(
-    background="#F3F6F5",
+    background="#F6F7F9",
     surface="#FFFFFF",
-    elevated="#E8EFEC",
-    text="#17201D",
-    muted="#64716C",
-    border="#CDD8D3",
-    accent="#176B5B",
+    elevated="#EEF1F6",
+    text="#182033",
+    muted="#6D7688",
+    border="#DCE1E9",
+    accent="#315EEA",
     accent_text="#FFFFFF",
-    selection="#CDE8DF",
+    selection="#E5EBFF",
 )
 
 DARK = Palette(
-    background="#161B19",
-    surface="#222926",
-    elevated="#2A3430",
-    text="#EEF4F1",
-    muted="#A3B2AC",
-    border="#3C4B45",
-    accent="#45B89C",
-    accent_text="#10201B",
-    selection="#315E52",
+    background="#11151C",
+    surface="#181E28",
+    elevated="#222A38",
+    text="#F1F4F9",
+    muted="#98A2B5",
+    border="#303A4B",
+    accent="#7896FF",
+    accent_text="#0E1526",
+    selection="#293B70",
 )
 
 
@@ -79,7 +79,7 @@ def apply_theme(root: tk.Tk, theme: str) -> Palette:
     style.configure("TFrame", background=palette.background)
     style.configure("Surface.TFrame", background=palette.surface)
     style.configure("TLabel", background=palette.background, foreground=palette.text)
-    style.configure("Title.TLabel", font=("Segoe UI Semibold", 15), foreground=palette.text)
+    style.configure("Title.TLabel", font=("Segoe UI Semibold", 12), foreground=palette.text)
     style.configure("Section.TLabel", font=("Segoe UI Semibold", 10), foreground=palette.text)
     style.configure(
         "Key.TLabel",
@@ -94,7 +94,8 @@ def apply_theme(root: tk.Tk, theme: str) -> Palette:
         background=palette.elevated,
         foreground=palette.text,
         bordercolor=palette.border,
-        padding=(9, 6),
+        relief="flat",
+        padding=(10, 7),
     )
     style.map("TButton", background=[("active", palette.selection)])
     style.configure(
@@ -106,12 +107,20 @@ def apply_theme(root: tk.Tk, theme: str) -> Palette:
     )
     style.map("Accent.TButton", background=[("active", palette.accent)])
     style.configure(
+        "Quiet.TButton",
+        background=palette.background,
+        foreground=palette.muted,
+        bordercolor=palette.background,
+        padding=(7, 6),
+    )
+    style.map("Quiet.TButton", background=[("active", palette.elevated)])
+    style.configure(
         "Treeview",
         background=palette.surface,
         fieldbackground=palette.surface,
         foreground=palette.text,
         bordercolor=palette.border,
-        rowheight=32,
+        rowheight=38,
     )
     style.configure(
         "Treeview.Heading",

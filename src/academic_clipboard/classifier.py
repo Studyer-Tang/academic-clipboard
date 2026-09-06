@@ -13,6 +13,7 @@ from academic_clipboard.formatters import (
     url_markdown,
 )
 from academic_clipboard.models import ClassifiedClip
+from academic_clipboard.transforms import markdown_table, table_rows
 
 URL_PATTERN = re.compile(r"(?i)^https?://[^\s]+$")
 BIBTEX_PATTERN = re.compile(
@@ -80,6 +81,16 @@ def _looks_like_title(value: str) -> bool:
     return 4 <= len(words) <= 30 and 20 <= len(value) <= 240
 
 
+def _looks_like_formula(value: str) -> bool:
+    content = value.strip()
+    if "\n" in content or len(content) > 500:
+        return False
+    if (content.startswith("$") and content.endswith("$")) or content.startswith((r"\[", r"\(")):
+        return True
+    commands = (r"\frac", r"\sum", r"\int", r"\sqrt", r"\begin{equation", r"\operatorname")
+    return any(command in content for command in commands)
+
+
 def classify(value: str) -> ClassifiedClip:
     content = value.strip()
     if not content:
@@ -99,6 +110,15 @@ def classify(value: str) -> ClassifiedClip:
         parsed = urlparse(content)
         title = parsed.netloc.removeprefix("www.") + (parsed.path.rstrip("/") or "")
         return ClassifiedClip("url", subtype, title, url_markdown(content))
+    rows = table_rows(content)
+    if len(rows) >= 2 and min(len(row) for row in rows) >= 2:
+        subtype = "tab-separated" if "\t" in content else "markdown"
+        return ClassifiedClip(
+            "table", subtype, f"{len(rows)} × {max(len(row) for row in rows)} table", markdown_table(content)
+        )
+    if _looks_like_formula(content):
+        preview = " ".join(content.split())[:100]
+        return ClassifiedClip("formula", "latex", preview, content)
     if _looks_like_code(content):
         language = _code_language(content)
         raw = re.sub(r"(?s)^```[\w+-]*\s*|\s*```$", "", content).strip("\n")
