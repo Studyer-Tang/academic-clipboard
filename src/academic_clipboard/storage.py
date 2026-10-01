@@ -5,6 +5,7 @@ import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -490,44 +491,21 @@ class ClipboardStore:
                     stream.write(item.content.strip() + "\n\n")
 
     def export_json(self, path: Path) -> None:
-        payload = (
-            {
-                "id": item.id,
-                "kind": item.kind,
-                "subtype": item.subtype,
-                "title": item.title,
-                "content": item.content,
-                "normalized_content": item.normalized_content,
-                "created_at": item.created_at,
-                "last_copied_at": item.last_copied_at,
-                "copy_count": item.copy_count,
-                "pinned": item.pinned,
-                "tags": item.tags,
-                "media_path": item.media_path,
-                "width": item.width,
-                "height": item.height,
-                "source": item.source,
-                "locator": item.locator,
-                "project": item.project,
-                "note": item.note,
-            }
-            for item in self.iter_items()
-        )
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as stream:
             stream.write("[\n")
-            for index, item in enumerate(payload):
+            for index, item in enumerate(self.iter_items()):
                 if index:
                     stream.write(",\n")
-                json.dump(item, stream, ensure_ascii=False, indent=2)
+                json.dump(asdict(item), stream, ensure_ascii=False, indent=2)
             stream.write("\n]\n")
 
     def export_markdown(self, path: Path) -> None:
-        rows = self.iter_items()
-        lines = ["# Academic Clipboard export", ""]
-        for item in rows:
-            lines.extend(
-                [
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as stream:
+            stream.write("# Academic Clipboard export\n\n")
+            for item in self.iter_items():
+                lines = [
                     f"## {item.title or item.kind}",
                     "",
                     f"- Type: `{item.kind}/{item.subtype}`",
@@ -537,19 +515,10 @@ class ClipboardStore:
                     f"- Project: {item.project or '-'}",
                     f"- Source: {item.source or '-'}",
                     f"- Locator: {item.locator or '-'}",
-                    *(
-                        [
-                            f"- Image: `{item.media_path}`",
-                            f"- Dimensions: {item.width}×{item.height}",
-                        ]
-                        if item.kind == "image"
-                        else []
-                    ),
-                    "",
-                    item.normalized_content,
-                    *(["", f"> Note: {item.note}"] if item.note else []),
-                    "",
                 ]
-            )
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines), encoding="utf-8")
+                if item.kind == "image":
+                    lines += [f"- Image: `{item.media_path}`", f"- Dimensions: {item.width}×{item.height}"]
+                lines += ["", item.normalized_content]
+                if item.note:
+                    lines += ["", f"> Note: {item.note}"]
+                stream.write("\n".join(lines) + "\n\n")

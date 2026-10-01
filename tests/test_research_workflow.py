@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from academic_clipboard.storage import ClipboardStore
@@ -64,11 +65,11 @@ class ResearchWorkflowTests(unittest.TestCase):
 
     def test_old_database_gets_payload_size_without_losing_data(self):
         item = self.store.add("A legacy note")
-        with sqlite3.connect(self.store.path) as connection:
+        with closing(sqlite3.connect(self.store.path)) as connection, connection:
             connection.execute("ALTER TABLE clipboard_items DROP COLUMN payload_bytes")
         migrated = ClipboardStore(self.store.path)
         self.assertEqual(migrated.get_many([item.id])[0].content, "A legacy note")
-        with sqlite3.connect(self.store.path) as connection:
+        with closing(sqlite3.connect(self.store.path)) as connection, connection:
             self.assertGreater(
                 connection.execute("SELECT payload_bytes FROM clipboard_items").fetchone()[0], 0
             )
@@ -82,7 +83,7 @@ class ResearchWorkflowTests(unittest.TestCase):
         self.assertEqual(path.read_text().strip(), bib)
 
     def test_export_is_not_truncated_by_the_ui_limit(self):
-        with sqlite3.connect(self.store.path) as connection:
+        with closing(sqlite3.connect(self.store.path)) as connection, connection:
             connection.executemany(
                 "INSERT INTO clipboard_items(content,content_hash,normalized_content,kind,subtype,title,created_at) "
                 "VALUES (?,?,?,'text','plain','test','2026-10-01')",
