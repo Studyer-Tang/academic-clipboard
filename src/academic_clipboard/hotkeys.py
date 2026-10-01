@@ -22,6 +22,9 @@ MODIFIERS = {
     "shift": MOD_SHIFT,
     "win": MOD_WIN,
     "windows": MOD_WIN,
+    "cmd": MOD_WIN,
+    "command": MOD_WIN,
+    "option": MOD_ALT,
 }
 
 SPECIAL_KEYS = {
@@ -46,7 +49,7 @@ def parse_hotkey(value: str) -> tuple[int, int]:
             raise ValueError(f"unknown modifier: {part}") from error
     if not modifiers:
         raise ValueError("hotkey must include Ctrl, Alt, Shift, or Win")
-    if len(key_name) == 1 and key_name.isalnum():
+    if len(key_name) == 1 and key_name.isascii() and key_name.isalnum():
         virtual_key = ord(key_name.upper())
     elif key_name in SPECIAL_KEYS:
         virtual_key = SPECIAL_KEYS[key_name]
@@ -66,14 +69,21 @@ class GlobalHotkey:
         self.registered = False
         self.error = ""
         self.ready = threading.Event()
+        self._mac = None
 
     def start(self) -> tuple[bool, str]:
-        if sys.platform != "win32":
-            return False, "global hotkeys are currently supported on Windows"
         try:
             modifiers, virtual_key = parse_hotkey(self.specification)
         except ValueError as error:
             return False, str(error)
+        if sys.platform == "darwin":
+            from academic_clipboard.mac_hotkey import MacHotkey
+
+            self._mac = MacHotkey(self.callback)
+            self.registered, self.error = self._mac.start(modifiers, virtual_key)
+            return self.registered, self.error
+        if sys.platform != "win32":
+            return False, "global hotkeys require Windows or macOS"
         self.thread = threading.Thread(
             target=self._run,
             args=(modifiers, virtual_key),
@@ -115,6 +125,10 @@ class GlobalHotkey:
             self.registered = False
 
     def stop(self) -> None:
+        if self._mac is not None:
+            self._mac.stop()
+            self._mac = None
+            self.registered = False
         if self.thread_id and self.thread and self.thread.is_alive():
             user32 = ctypes.WinDLL("user32", use_last_error=True)
             user32.PostThreadMessageW(self.thread_id, WM_QUIT, 0, 0)

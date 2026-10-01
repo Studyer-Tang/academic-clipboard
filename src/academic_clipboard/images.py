@@ -10,6 +10,9 @@ from pathlib import Path
 
 from PIL import Image, ImageGrab
 
+MAX_IMAGE_PIXELS = 16_000_000
+MAX_IMAGE_BYTES = 32 * 1024 * 1024
+
 
 @dataclass(frozen=True, slots=True)
 class ClipboardImage:
@@ -23,10 +26,14 @@ def encode_png(image: Image.Image) -> ClipboardImage:
     """Convert a clipboard bitmap to a deterministic, portable PNG payload."""
     # A Windows DIB round-trip can drop an opaque alpha channel. Always using
     # RGBA keeps the same visible screenshot stable across capture and copy-back.
+    if image.width * image.height > MAX_IMAGE_PIXELS:
+        raise ValueError("image exceeds the 16 megapixel capture limit")
     normalized = image.convert("RGBA")
     output = io.BytesIO()
     normalized.save(output, format="PNG")
     payload = output.getvalue()
+    if len(payload) > MAX_IMAGE_BYTES:
+        raise ValueError("image exceeds the 32 MiB capture limit")
     return ClipboardImage(
         png_bytes=payload,
         width=normalized.width,
@@ -38,6 +45,18 @@ def encode_png(image: Image.Image) -> ClipboardImage:
 def read_clipboard_image() -> ClipboardImage | None:
     """Read an actual clipboard bitmap, ignoring lists of copied file paths."""
     try:
+        if sys.platform == "darwin":
+            from AppKit import NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF
+
+            board = NSPasteboard.generalPasteboard()
+            kind = board.availableTypeFromArray_([NSPasteboardTypePNG, NSPasteboardTypeTIFF])
+            data = board.dataForType_(kind) if kind else None
+            if data is None:
+                return None
+            if data.length() > MAX_IMAGE_BYTES:
+                raise ValueError("clipboard image exceeds the 32 MiB capture limit")
+            with Image.open(io.BytesIO(bytes(data))) as value:
+                return encode_png(value)
         value = ImageGrab.grabclipboard()
     except (OSError, NotImplementedError):
         return None
@@ -54,9 +73,21 @@ def _dib_bytes(path: Path) -> bytes:
 
 
 def copy_image_to_clipboard(path: Path) -> None:
-    """Place a saved image on the Windows clipboard as a device-independent bitmap."""
+    """Publish PNG on macOS and a device-independent bitmap on Windows."""
+    if sys.platform == "darwin":
+        from AppKit import NSPasteboard, NSPasteboardTypePNG
+        from Foundation import NSData
+
+        data = NSData.dataWithContentsOfFile_(str(path))
+        if data is None:
+            raise OSError("could not read image")
+        board = NSPasteboard.generalPasteboard()
+        board.clearContents()
+        if not board.setData_forType_(data, NSPasteboardTypePNG):
+            raise OSError("could not set clipboard image data")
+        return
     if sys.platform != "win32":
-        raise OSError("copying images is currently supported on Windows only")
+        raise OSError("copying images requires Windows or macOS")
 
     payload = _dib_bytes(path)
     user32 = ctypes.windll.user32

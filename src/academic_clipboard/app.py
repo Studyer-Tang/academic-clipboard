@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import time
+import sqlite3
+import sys
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
@@ -9,6 +10,7 @@ from tkinter import filedialog, messagebox
 
 from PIL import Image, ImageTk
 
+from academic_clipboard.clipboard import ClipboardState
 from academic_clipboard.dialogs import edit_item, edit_settings, show_shortcuts
 from academic_clipboard.hotkeys import GlobalHotkey, parse_hotkey
 from academic_clipboard.i18n import tr
@@ -39,7 +41,7 @@ class AcademicClipboardApp:
         self.capture_enabled = True
         self.last_clipboard = ""
         self.last_image_hash = ""
-        self.ignore_image_until = 0.0
+        self.clipboard = ClipboardState()
         self.detail_photo: ImageTk.PhotoImage | None = None
         self.compact_photo: ImageTk.PhotoImage | None = None
         self.items: dict[int, ClipboardItem] = {}
@@ -64,6 +66,9 @@ class AcademicClipboardApp:
         self.root.after(100, self._process_ui_actions)
         self.root.after(self.settings.poll_milliseconds, self._poll_clipboard)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        if sys.platform == "darwin":
+            self.root.createcommand("tk::mac::ReopenApplication", self.show_window)
+            self.root.createcommand("tk::mac::Quit", self.quit)
 
     def _configure_style(self) -> None:
         self.palette = apply_theme(self.root, self.settings.theme)
@@ -77,6 +82,13 @@ class AcademicClipboardApp:
         self.root.bind("<Delete>", lambda _event: self.delete_selected())
         self.root.bind("<Control-Return>", lambda _event: self.copy_selected(normalized=False))
         self.root.bind("<Control-Shift-Return>", lambda _event: self.copy_selected(normalized=True))
+        if sys.platform == "darwin":
+            self.root.bind("<Command-f>", lambda _event: self._focus_search())
+            self.root.bind("<Command-Return>", lambda _event: self.copy_selected(normalized=False))
+            self.root.bind("<Command-Shift-Return>", lambda _event: self.copy_selected(normalized=True))
+            self.tree.bind("<Command-a>", lambda _event: self.select_all())
+            self.tree.bind("<Button-2>", self._show_context_menu)
+            self.tree.bind("<Control-Button-1>", self._show_context_menu)
         self.root.bind("<Escape>", lambda _event: self._handle_escape())
         self.tree.bind("<Control-a>", lambda _event: self.select_all())
         self.tree.bind("<Return>", lambda _event: self.copy_selected(normalized=False))
@@ -163,7 +175,7 @@ class AcademicClipboardApp:
         if not identifiers:
             self.status_var.set(tr("请先选择一条记录", "Select an item first"))
             return
-        item = self.items.get(identifiers[0])
+        item = next(iter(self.store.get_many(identifiers)), None)
         if item is None:
             return
         if item.kind == "image":
@@ -184,7 +196,7 @@ class AcademicClipboardApp:
         identifiers = self._selected_ids()
         if len(identifiers) != 1:
             return
-        item = self.items.get(identifiers[0])
+        item = next(iter(self.store.get_many(identifiers)), None)
         if item is None:
             return
         transform = next(
@@ -202,6 +214,7 @@ class AcademicClipboardApp:
         compact = self.settings.compact_mode
         detail_is_visible = str(self.detail_frame) in self.pane.panes()
         if compact:
+            self.capture_status.pack_forget()
             if detail_is_visible:
                 self.pane.forget(self.detail_frame)
             self.tree.configure(displaycolumns=("pin", "kind", "preview"), show="")
@@ -221,6 +234,7 @@ class AcademicClipboardApp:
             x = max(0, self.root.winfo_screenwidth() - width - 24)
             y = 72
         else:
+            self.capture_status.pack(side="left", after=self.title_label, padx=(10, 0))
             if not detail_is_visible:
                 self.pane.add(self.detail_frame, weight=2)
             self.tree.configure(displaycolumns=("pin", "kind", "preview", "copies", "time"), show="headings")
@@ -276,7 +290,10 @@ class AcademicClipboardApp:
 
     def _start_tray(self) -> None:
         try:
-            from academic_clipboard.tray import TrayController
+            if sys.platform == "darwin":
+                from academic_clipboard.mac_tray import MacTray as TrayController
+            else:
+                from academic_clipboard.tray import TrayController
 
             self.tray = TrayController(
                 on_show=lambda: self._enqueue(self.show_window),
@@ -305,7 +322,7 @@ class AcademicClipboardApp:
     def refresh(self) -> None:
         self.search_after = None
         selected = set(self.tree.selection())
-        rows = self.store.list_items(self.search_var.get(), self._selected_kind())
+        rows = self.store.list_items(self.search_var.get(), self._selected_kind(), previews=True)
         self.items = {item.id: item for item in rows}
         self.tree.delete(*self.tree.get_children())
         if rows:
@@ -352,9 +369,11 @@ class AcademicClipboardApp:
                 text=tr(f"已选择 {len(identifiers)} 项", f"{len(identifiers)} items selected")
             )
             self.detail_meta.configure(text=tr("将按列表顺序合并复制", "Copies in the visible list order"))
-            body = self.settings.join_separator.join(self.items[item].content for item in identifiers)
+            body = self.settings.join_separator.join(
+                item.content for item in self.store.get_many(identifiers)
+            )[:100_000]
         else:
-            item = self.items[identifiers[0]]
+            item = self.store.get_many(identifiers)[0]
             self.detail_title.configure(text=item.title or item.kind)
             metadata = [
                 f"{item.kind}/{item.subtype}",
@@ -444,6 +463,9 @@ class AcademicClipboardApp:
         self.detail_image.pack(fill="both", expand=True)
 
     def _read_clipboard(self) -> str:
+        native = self.clipboard.text()
+        if native is not None:
+            return native
         try:
             value = self.root.clipboard_get()
         except tk.TclError:
@@ -462,7 +484,7 @@ class AcademicClipboardApp:
             self.status_var.set(f"Skipped possible {reason} / 已跳过疑似敏感内容")
             return False
         item = self.store.add(content)
-        self.store.prune(self.settings.max_items, self.settings.retention_days)
+        self.store.prune(self.settings.max_items, self.settings.retention_days, self.settings.max_storage_mb)
         if force or not self.search_var.get():
             self.refresh()
         self.status_var.set(f"Captured {item.kind}/{item.subtype} / 已保存 {item.kind}/{item.subtype}")
@@ -470,7 +492,7 @@ class AcademicClipboardApp:
 
     def _capture_image(self, image: ClipboardImage, force: bool = False) -> bool:
         item = self.store.add_image(image.png_bytes, image.width, image.height)
-        self.store.prune(self.settings.max_items, self.settings.retention_days)
+        self.store.prune(self.settings.max_items, self.settings.retention_days, self.settings.max_storage_mb)
         if force or not self.search_var.get():
             self.refresh()
             identifier = str(item.id)
@@ -485,47 +507,57 @@ class AcademicClipboardApp:
         return True
 
     def _poll_clipboard(self) -> None:
+        if self.shutting_down:
+            return
+        try:
+            if self.clipboard.changed() and self.capture_enabled and not self.clipboard.private():
+                self._capture_clipboard()
+        except (OSError, ValueError, tk.TclError, sqlite3.Error) as error:
+            if not isinstance(error, ValueError):
+                self.clipboard.forget()
+            self.status_var.set(tr("剪贴板暂不可用：", "Clipboard unavailable: ") + str(error))
+        finally:
+            if not self.shutting_down:
+                self.root.after(self.settings.poll_milliseconds, self._poll_clipboard)
+
+    def _capture_clipboard(self, force: bool = False) -> None:
+        sequence = self.clipboard.sequence()
         value = self._read_clipboard()
+        image = read_clipboard_image() if not value else None
+        # A copy can arrive while decoding an image. Never save a mixed/private snapshot.
+        if sequence != self.clipboard.sequence() or self.clipboard.private():
+            self.clipboard.forget()
+            return
         if value:
             self.last_image_hash = ""
-            if self.capture_enabled and value != self.last_clipboard:
-                self.last_clipboard = value
-                self._capture(value)
-            else:
-                self.last_clipboard = value
+            if force or value != self.last_clipboard:
+                self._capture(value, force=force)
+            self.last_clipboard = value
         else:
-            image = read_clipboard_image()
             if image is not None:
                 self.last_clipboard = ""
-                is_own_copy = time.monotonic() < self.ignore_image_until
-                if self.capture_enabled and not is_own_copy and image.digest != self.last_image_hash:
-                    self.last_image_hash = image.digest
-                    self._capture_image(image)
-                else:
-                    self.last_image_hash = image.digest
-                self.ignore_image_until = 0.0
-        self.root.after(self.settings.poll_milliseconds, self._poll_clipboard)
+                if force or image.digest != self.last_image_hash:
+                    self._capture_image(image, force=force)
+                self.last_image_hash = image.digest
+            else:
+                self.last_clipboard = self.last_image_hash = ""
 
     def capture_now(self) -> None:
-        value = self._read_clipboard()
-        if value.strip():
-            self.last_clipboard = value
-            self.last_image_hash = ""
-            self._capture(value, force=True)
+        if self.clipboard.private():
+            self.status_var.set(tr("已跳过保密或临时剪贴板内容", "Skipped private or transient clipboard"))
             return
-        image = read_clipboard_image()
-        if image is not None:
-            self.last_clipboard = ""
-            self.last_image_hash = image.digest
-            self._capture_image(image, force=True)
-            return
-        self.status_var.set("No storable text or image / 剪贴板中没有可保存的文本或图片")
+        try:
+            self._capture_clipboard(force=True)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            self.status_var.set(str(error))
 
     def _set_clipboard(self, value: str) -> None:
         self.last_clipboard = value
-        self.root.clipboard_clear()
-        self.root.clipboard_append(value)
+        if not self.clipboard.set_text(value):
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
         self.root.update_idletasks()
+        self.clipboard.changed()
 
     def copy_selected(self, normalized: bool) -> None:
         identifiers = self._selected_ids()
@@ -549,7 +581,7 @@ class AcademicClipboardApp:
                 return
             self.last_clipboard = ""
             self.last_image_hash = Path(image_items[0].media_path).stem
-            self.ignore_image_until = time.monotonic() + 2.0
+            self.clipboard.changed()
             self.store.mark_copied(identifiers)
             self.refresh()
             self.status_var.set("Image copied / 图片已复制")
@@ -571,7 +603,7 @@ class AcademicClipboardApp:
         if len(identifiers) != 1:
             self.status_var.set("Select exactly one item to edit / 请选择一项进行编辑")
             return "break"
-        item = self.items.get(identifiers[0]) or self.store.get_many(identifiers)[0]
+        item = self.store.get_many(identifiers)[0]
         result = edit_item(self.root, item, self.palette)
         if result is None:
             return "break"
@@ -630,7 +662,7 @@ class AcademicClipboardApp:
             self.compact_preview_caption.configure(foreground=self.palette.muted)
         if self.settings.global_hotkey != previous_hotkey:
             self._restart_hotkey()
-        self.store.prune(self.settings.max_items, self.settings.retention_days)
+        self.store.prune(self.settings.max_items, self.settings.retention_days, self.settings.max_storage_mb)
         self.refresh()
 
     def open_shortcuts(self) -> str:
@@ -665,18 +697,22 @@ class AcademicClipboardApp:
         path = filedialog.asksaveasfilename(
             title="Export Academic Clipboard",
             defaultextension=".md",
-            filetypes=(("Markdown", "*.md"), ("JSON", "*.json")),
+            filetypes=(("Markdown", "*.md"), ("JSON", "*.json"), ("BibTeX", "*.bib")),
         )
         if not path:
             return
         destination = Path(path)
-        if destination.suffix.casefold() == ".json":
+        if destination.suffix.casefold() == ".bib":
+            self.store.export_bibtex(destination)
+        elif destination.suffix.casefold() == ".json":
             self.store.export_json(destination)
         else:
             self.store.export_markdown(destination)
         self.status_var.set(f"Exported to {destination.name} / 已导出")
 
     def toggle_capture(self) -> None:
+        # Mark the paused clipboard as seen; resuming must not store paused content.
+        self.clipboard.changed()
         self.capture_enabled = not self.capture_enabled
         self.capture_button.configure(text="Ⅱ" if self.capture_enabled else "▶")
         self.capture_status.configure(
@@ -718,7 +754,7 @@ class AcademicClipboardApp:
         self.root.destroy()
 
 
-def run(start_hidden: bool = False) -> int:
+def run(start_hidden: bool = False, start_paused: bool = False) -> int:
     from academic_clipboard.single_instance import SingleInstance, notify_already_running
 
     instance = SingleInstance()
@@ -730,10 +766,13 @@ def run(start_hidden: bool = False) -> int:
     settings_path = home / "settings.json"
     settings = Settings.load(settings_path)
     store = ClipboardStore(home / "clipboard.db")
+    store.prune(settings.max_items, settings.retention_days, settings.max_storage_mb)
     try:
         root = tk.Tk()
         app = AcademicClipboardApp(root, store, settings, settings_path)
-        if start_hidden:
+        if start_paused:
+            app.toggle_capture()
+        if start_hidden and app.tray is not None:
             app.hide_window()
         root.mainloop()
     finally:

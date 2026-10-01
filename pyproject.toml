@@ -4,17 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "academic-clipboard"
-version = "0.4.0"
+version = "0.5.0"
 description = "A local-first clipboard and research-snippet manager for students and researchers"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Academic Clipboard contributors" }]
-dependencies = ["Pillow>=10.4", "pystray>=0.19.5"]
+dependencies = [
+  "Pillow>=10.4,<13",
+  "pystray>=0.19.5,<0.20; sys_platform != 'darwin'",
+  "pyobjc-framework-Cocoa>=10,<13; sys_platform == 'darwin'",
+]
 keywords = ["clipboard", "research", "doi", "bibtex", "snippets", "productivity"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Win32 (MS Windows)",
+  "Environment :: MacOS X",
   "Intended Audience :: Science/Research",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0 preview
+
+- Add macOS native text/image pasteboard, menu bar item, registered global hotkey, Command shortcuts, dark-mode/language preference and per-user login launch. Keep Windows tray support.
+- Read clipboard payloads only after ownership changes; respect private pasteboard markers, pause before reads, keep polling after recoverable errors, remove the two-second image-copy suppression window.
+- Bound history previews to 240 characters and load selected contents on demand. Add unpinned byte-budget retention, image limits, literal `%`/`_` search and safe settings defaults.
+- Add opt-in PDF line cleanup, source/locator quotes, tab-separated tables for Word/Excel and lossless BibTeX export. Fix nested LaTeX delimiters and table escaping. Remove JSON export's 5000-item truncation.
+- Build self-contained Windows ZIP and macOS arm64/Intel DMGs with packaged desktop smoke tests and SHA-256 checksums. These are unsigned previews.
+- Document research evidence, reproducible measurements and remaining compatibility boundaries.
+
 All notable changes will be documented here.
 
 ## 0.4.0 - 2026-09-06

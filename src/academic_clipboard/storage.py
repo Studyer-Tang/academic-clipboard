@@ -94,6 +94,23 @@ class ClipboardStore:
             ):
                 if name not in columns:
                     connection.execute(f"ALTER TABLE clipboard_items ADD COLUMN {name} {definition}")
+            if "payload_bytes" not in columns:
+                connection.execute(
+                    "ALTER TABLE clipboard_items ADD COLUMN payload_bytes INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    "UPDATE clipboard_items SET payload_bytes = length(CAST(content AS BLOB)) "
+                    "+ length(CAST(normalized_content AS BLOB))"
+                )
+                for row in connection.execute(
+                    "SELECT id, media_path FROM clipboard_items WHERE media_path != ''"
+                ):
+                    path = (self.path.parent / row["media_path"]).resolve()
+                    if path.is_relative_to(self.images_dir.resolve()) and path.is_file():
+                        connection.execute(
+                            "UPDATE clipboard_items SET payload_bytes = ? WHERE id = ?",
+                            (path.stat().st_size, row["id"]),
+                        )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
@@ -118,8 +135,8 @@ class ClipboardStore:
             connection.execute(
                 """
                 INSERT INTO clipboard_items
-                    (content, content_hash, normalized_content, kind, subtype, title, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (content, content_hash, normalized_content, kind, subtype, title, created_at, payload_bytes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(content_hash) DO UPDATE SET
                     content = excluded.content,
                     normalized_content = excluded.normalized_content,
@@ -128,7 +145,8 @@ class ClipboardStore:
                     title = CASE clipboard_items.custom_title
                         WHEN 1 THEN clipboard_items.title ELSE excluded.title END,
                     created_at = excluded.created_at,
-                    copy_count = clipboard_items.copy_count + 1
+                    copy_count = clipboard_items.copy_count + 1,
+                    payload_bytes = excluded.payload_bytes
                 """,
                 (
                     content,
@@ -138,6 +156,7 @@ class ClipboardStore:
                     detected.subtype,
                     detected.title,
                     now,
+                    len(content.encode("utf-8")) + len(detected.normalized_content.encode("utf-8")),
                 ),
             )
             row = connection.execute(
@@ -164,8 +183,8 @@ class ClipboardStore:
                     """
                     INSERT INTO clipboard_items
                         (content, content_hash, normalized_content, kind, subtype, title, created_at,
-                         media_path, width, height)
-                    VALUES (?, ?, ?, 'image', 'screenshot', 'Screenshot / 截图', ?, ?, ?, ?)
+                         media_path, width, height, payload_bytes)
+                    VALUES (?, ?, ?, 'image', 'screenshot', 'Screenshot / 截图', ?, ?, ?, ?, ?)
                     ON CONFLICT(content_hash) DO UPDATE SET
                         created_at = excluded.created_at,
                         copy_count = clipboard_items.copy_count + 1,
@@ -181,6 +200,7 @@ class ClipboardStore:
                         relative_path.as_posix(),
                         width,
                         height,
+                        len(png_bytes),
                     ),
                 )
                 row = connection.execute(
@@ -206,24 +226,35 @@ class ClipboardStore:
             raise ValueError("image path points outside the local media directory")
         return candidate
 
-    def list_items(self, search: str = "", kind: str = "all", limit: int = 500) -> list[ClipboardItem]:
+    def list_items(
+        self, search: str = "", kind: str = "all", limit: int = 500, previews: bool = False
+    ) -> list[ClipboardItem]:
         clauses: list[str] = []
         parameters: list[object] = []
         if search.strip():
             clauses.append(
-                "(content LIKE ? OR normalized_content LIKE ? OR title LIKE ? OR subtype LIKE ? "
-                "OR tags LIKE ? OR source LIKE ? OR locator LIKE ? OR project LIKE ? OR note LIKE ?)"
+                "(content LIKE ? ESCAPE '\\' OR normalized_content LIKE ? ESCAPE '\\' "
+                "OR title LIKE ? ESCAPE '\\' OR subtype LIKE ? ESCAPE '\\' "
+                "OR tags LIKE ? ESCAPE '\\' OR source LIKE ? ESCAPE '\\' "
+                "OR locator LIKE ? ESCAPE '\\' OR project LIKE ? ESCAPE '\\' OR note LIKE ? ESCAPE '\\')"
             )
-            term = f"%{search.strip()}%"
+            term = "%" + search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
             parameters.extend([term] * 9)
         if kind and kind != "all":
             clauses.append("kind = ?")
             parameters.append(kind)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         parameters.append(max(1, min(limit, 5000)))
+        columns = "*"
+        if previews:
+            columns = (
+                "id, substr(content,1,240) AS content, '' AS normalized_content, kind, subtype, "
+                "title, created_at, last_copied_at, copy_count, pinned, tags, media_path, width, "
+                "height, source, locator, project, '' AS note"
+            )
         with self._connection() as connection:
             rows = connection.execute(
-                f"SELECT * FROM clipboard_items {where} ORDER BY pinned DESC, created_at DESC LIMIT ?",  # noqa: S608
+                f"SELECT {columns} FROM clipboard_items {where} ORDER BY pinned DESC, created_at DESC, id DESC LIMIT ?",  # noqa: S608
                 parameters,
             ).fetchall()
         return [_item(row) for row in rows]
@@ -283,7 +314,7 @@ class ClipboardStore:
                     UPDATE clipboard_items SET
                         content = ?, content_hash = ?, normalized_content = ?, kind = ?, subtype = ?,
                         title = ?, tags = ?, source = ?, locator = ?, project = ?, note = ?,
-                        custom_title = 1
+                        custom_title = 1, payload_bytes = ?
                     WHERE id = ?
                     """,
                     (
@@ -298,6 +329,7 @@ class ClipboardStore:
                         clean_locator,
                         clean_project,
                         clean_note,
+                        len(clean_content.encode("utf-8")) + len(detected.normalized_content.encode("utf-8")),
                         identifier,
                     ),
                 )
@@ -401,46 +433,28 @@ class ClipboardStore:
         with self._connection() as connection:
             return int(connection.execute("SELECT COUNT(*) FROM clipboard_items").fetchone()[0])
 
-    def prune(self, max_items: int, retention_days: int) -> int:
+    def prune(self, max_items: int, retention_days: int, max_storage_mb: int = 256) -> int:
+        """Bound unpinned payloads; pinned research notes are never silently removed."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, retention_days))).isoformat(
             timespec="seconds"
         )
+        budget = max(1, max_storage_mb) * 1024 * 1024
+        used = kept = 0
+        identifiers = []
         with self._connection() as connection:
-            expired_ids = [
-                row["id"]
-                for row in connection.execute(
-                    "SELECT id FROM clipboard_items WHERE pinned = 0 AND created_at < ?", (cutoff,)
-                ).fetchall()
-            ]
-            media_paths = self._media_paths_for_ids(connection, expired_ids)
-            expired = connection.execute(
-                "DELETE FROM clipboard_items WHERE pinned = 0 AND created_at < ?", (cutoff,)
-            ).rowcount
-            overflow_ids = [
-                row["id"]
-                for row in connection.execute(
-                    """
-                    SELECT id FROM clipboard_items
-                    WHERE pinned = 0 AND id NOT IN (
-                        SELECT id FROM clipboard_items WHERE pinned = 0
-                        ORDER BY created_at DESC LIMIT ?
-                    )
-                    """,
-                    (max(1, max_items),),
-                ).fetchall()
-            ]
-            media_paths.extend(self._media_paths_for_ids(connection, overflow_ids))
-            overflow = connection.execute(
-                """
-                DELETE FROM clipboard_items
-                WHERE pinned = 0 AND id NOT IN (
-                    SELECT id FROM clipboard_items WHERE pinned = 0 ORDER BY created_at DESC LIMIT ?
-                )
-                """,
-                (max(1, max_items),),
-            ).rowcount
-        self._remove_media_files(media_paths)
-        return expired + overflow
+            rows = connection.execute(
+                "SELECT id, created_at, payload_bytes FROM clipboard_items WHERE pinned = 0 "
+                "ORDER BY created_at DESC, id DESC"
+            )
+            for row in rows:
+                size = row["payload_bytes"]
+                if row["created_at"] < cutoff or kept >= max(1, max_items) or used + size > budget:
+                    identifiers.append(row["id"])
+                else:
+                    used += size
+                    kept += 1
+        # Keep parameter counts below SQLite's older 999-variable limit.
+        return sum(self.delete(identifiers[start : start + 500]) for start in range(0, len(identifiers), 500))
 
     def _media_paths_for_ids(self, connection: sqlite3.Connection, identifiers: list[int]) -> list[str]:
         if not identifiers:
@@ -460,9 +474,23 @@ class ClipboardStore:
             if candidate.is_relative_to(base):
                 candidate.unlink(missing_ok=True)
 
+    def iter_items(self) -> Iterator[ClipboardItem]:
+        """Stream a consistent export snapshot without a UI result limit."""
+        with self._connection() as connection:
+            for row in connection.execute(
+                "SELECT * FROM clipboard_items ORDER BY pinned DESC, created_at DESC, id DESC"
+            ):
+                yield _item(row)
+
+    def export_bibtex(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as stream:
+            for item in self.iter_items():
+                if item.kind == "bibtex":
+                    stream.write(item.content.strip() + "\n\n")
+
     def export_json(self, path: Path) -> None:
-        rows = self.list_items(limit=5000)
-        payload = [
+        payload = (
             {
                 "id": item.id,
                 "kind": item.kind,
@@ -483,13 +511,19 @@ class ClipboardStore:
                 "project": item.project,
                 "note": item.note,
             }
-            for item in rows
-        ]
+            for item in self.iter_items()
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        with path.open("w", encoding="utf-8") as stream:
+            stream.write("[\n")
+            for index, item in enumerate(payload):
+                if index:
+                    stream.write(",\n")
+                json.dump(item, stream, ensure_ascii=False, indent=2)
+            stream.write("\n]\n")
 
     def export_markdown(self, path: Path) -> None:
-        rows = self.list_items(limit=5000)
+        rows = self.iter_items()
         lines = ["# Academic Clipboard export", ""]
         for item in rows:
             lines.extend(

@@ -22,6 +22,27 @@ class ContentTransform:
     value: str
 
 
+def clean_pdf_text(value: str, dehyphenate: bool = False) -> str:
+    """Opt-in prose cleanup; never replace the saved original or infer paragraph boundaries."""
+    text = value.replace("\r\n", "\n").replace("\r", "\n").replace("\u00ad", "")
+    for glyph, letters in (("ﬀ", "ff"), ("ﬁ", "fi"), ("ﬂ", "fl"), ("ﬃ", "ffi"), ("ﬄ", "ffl")):
+        text = text.replace(glyph, letters)
+    if dehyphenate:
+        text = re.sub(r"([A-Za-z]{2,})-[ \t]*\n[ \t]*(?=[a-z])", r"\1", text)
+    paragraphs = re.split(r"\n[ \t]*\n+", text.strip())
+    result = []
+    for paragraph in paragraphs:
+        paragraph = re.sub(r"(?<=[\u3400-\u9fff])[ \t]*\n[ \t]*(?=[\u3400-\u9fff])", "", paragraph)
+        result.append(re.sub(r"[\s\u00a0]+", " ", paragraph).strip())
+    return "\n\n".join(result)
+
+
+def quote_with_source(item: ClipboardItem) -> str:
+    quote = "\n".join("> " + line if line else ">" for line in item.content.splitlines())
+    attribution = " · ".join(part for part in (item.source, item.locator) if part)
+    return quote + (f"\n\n— {attribution}" if attribution else "")
+
+
 def _clean_bibtex_value(value: str) -> str:
     value = value.strip().rstrip(",").strip()
     if len(value) >= 2 and ((value[0], value[-1]) in {("{", "}"), ('"', '"')}):
@@ -136,7 +157,18 @@ def latex_table(value: str) -> str:
     width = max(len(row) for row in rows)
 
     def escape(cell: str) -> str:
-        replacements = {"&": r"\&", "%": r"\%", "#": r"\#", "_": r"\_"}
+        replacements = {
+            "&": r"\&",
+            "%": r"\%",
+            "#": r"\#",
+            "_": r"\_",
+            "$": r"\$",
+            "{": r"\{",
+            "}": r"\}",
+            "\\": r"\textbackslash{}",
+            "~": r"\textasciitilde{}",
+            "^": r"\textasciicircum{}",
+        }
         return "".join(replacements.get(character, character) for character in cell)
 
     padded = [row + [""] * (width - len(row)) for row in rows]
@@ -153,6 +185,23 @@ def available_transforms(item: ClipboardItem) -> list[ContentTransform]:
     transforms = [ContentTransform("original", tr("复制原文", "Copy original"), item.content)]
     if item.kind == "image":
         return transforms
+    if item.source or item.locator:
+        transforms.append(
+            ContentTransform("source-quote", tr("带出处复制", "Quote with source"), quote_with_source(item))
+        )
+    if item.kind in {"text", "title"} and "\n" in item.content:
+        transforms.extend(
+            (
+                ContentTransform(
+                    "pdf-text", tr("合并 PDF 断行", "Join PDF lines"), clean_pdf_text(item.content)
+                ),
+                ContentTransform(
+                    "pdf-dehyphenate",
+                    tr("合并断行及连字符（需核对）", "Join lines + hyphens (review)"),
+                    clean_pdf_text(item.content, dehyphenate=True),
+                ),
+            )
+        )
     if item.kind == "doi":
         doi = normalize_doi(item.content)
         transforms.extend(
@@ -205,10 +254,19 @@ def available_transforms(item: ClipboardItem) -> list[ContentTransform]:
                     "markdown-table", tr("Markdown 表格", "Markdown table"), markdown_table(item.content)
                 ),
                 ContentTransform("latex-table", tr("LaTeX 表格", "LaTeX table"), latex_table(item.content)),
+                ContentTransform(
+                    "tsv-table",
+                    tr("Excel / Word 制表符表格", "Excel / Word tab-separated table"),
+                    "\n".join("\t".join(row) for row in table_rows(item.content)),
+                ),
             )
         )
     elif item.kind == "formula":
-        formula = item.content.strip().strip("$")
+        formula = item.content.strip()
+        for start, end in ((r"\[", r"\]"), (r"\(", r"\)"), ("$$", "$$"), ("$", "$")):
+            if formula.startswith(start) and formula.endswith(end):
+                formula = formula[len(start) : -len(end)].strip()
+                break
         transforms.extend(
             (
                 ContentTransform("inline-latex", tr("行内公式", "Inline LaTeX"), rf"\({formula}\)"),

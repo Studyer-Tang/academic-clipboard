@@ -1,156 +1,102 @@
 # Academic Clipboard
 
-面向学生和研究者的本地优先科研剪贴板。按下快捷键即可找回刚复制的内容，并根据 DOI、BibTeX、公式、表格、论文标题等类型，直接转换成适合论文与笔记的格式。
+轻量、本地优先的科研剪贴板：找回复制过的文本和截图，整理出处、页码与批注，再复制到论文、Word、Excel 或笔记中。无需账号、网络服务或 AI 模型。
 
-A local-first clipboard history and research-snippet manager for students, researchers, and developers. Capture text and screenshots continuously, preview them locally, and copy them back when needed.
+An offline research clipboard for Windows and macOS. Search snippets, keep sources, clean copied PDF prose and reuse text/images. Python + Tk + SQLite; no browser runtime or telemetry.
 
-## 功能 / Features
+## 下载使用
 
-- 低噪声的快捷抽屉：默认只显示搜索、历史记录和“复制 / 转换 / 更多”三个动作，界面语言自动跟随系统。
-- 文本与截图剪贴板历史、搜索、类型筛选、置顶和删除；文本支持批量复制。
-- Windows 截图自动保存为本地 PNG；悬浮小窗选中截图即显示缩略图，无需展开，并可把任一历史截图重新复制到其他软件。
-- 默认以 390×380 的屏幕右侧置顶悬浮窗启动，还可继续手动缩小，阅读时不遮挡主要内容，并可一键展开完整详情。
-- 高 DPI 响应式布局，在常见 Windows 缩放比例下保持操作栏可见。
-- `Ctrl+Alt+V` 全局唤出，方向键选择、Enter 复制，数字 `1–9` 快速复制最近条目。
-- 为论文片段记录研究项目、来源、页码/章节、标签和个人批注；这些字段均可检索和导出。
-- 跟随系统、浅色和深色三种主题，以及应用内设置窗口。
-- 多选记录按顺序合并；原文和智能格式化结果可分别复制。
-- DOI 自动识别并转换为 Markdown 链接。
-- BibTeX 自动整理，并从已有字段生成可校对的 GB/T 7714 与 APA 风格参考文献草稿。
-- 论文标题生成 Markdown 阅读笔记模板。
-- 制表符或 Markdown 表格可转换为规范 Markdown 表格与 LaTeX `tabular`。
-- LaTeX 公式可在行内与独立公式格式之间转换。
-- Python、JavaScript、SQL、Shell、JSON 等代码自动保存为 fenced snippet。
-- URL 自动分类为论文、文档、数据集、GitHub/GitLab 仓库或普通网页。
-- 默认跳过疑似密码、Token、私钥、Authorization header 和验证码。
-- SQLite 与 PNG 本地存储，无账号、无遥测、无云服务，图片不会上传。
-- 中英双语界面；Windows 优先，同时保留 macOS/Linux 的 Tkinter 基础兼容性。
+从 [Releases](https://github.com/Studyer-Tang/academic-clipboard/releases) 选择 **0.5 系列预览版**：
 
-## 快速开始 / Quick start
+| 电脑 | 下载 | 使用 |
+| --- | --- | --- |
+| Windows 10/11 x64 | `Windows-x64.zip` | 完整解压，运行文件夹内 `AcademicClipboard.exe`，不要只移动 EXE |
+| Apple Silicon Mac（M 系列） | `macOS-arm64.dmg` | 打开 DMG，把应用拖入 Applications 后启动 |
+| Intel Mac | `macOS-x64.dmg` | 同上，选择 Intel 对应版本 |
 
-Windows 用户可从 [Releases](https://github.com/Studyer-Tang/academic-clipboard/releases) 下载最新版 `AcademicClipboard.exe`。程序为便携版，双击即可运行，无需安装。
+包内已包含 Python 和依赖，无需安装开发环境。每个下载附带 SHA-256 文件。**当前没有 Apple Developer ID 公证或 Windows 发布者签名**，系统可能提示未知开发者；按照系统的安全设置提示核实来源后允许打开，不需要关闭系统安全保护。Mac 构建在 macOS 15 上验收，更早系统尚未验证。Linux 提供源码/CLI，未承诺同等桌面能力。
 
-需要 Python 3.10 或更新版本，并包含标准库 Tkinter/Tcl-Tk。建议 Windows 用户从 [python.org](https://www.python.org/downloads/) 安装标准版 Python。Windows PowerShell：
+默认在屏幕右侧打开紧凑窗口。点击 `Ⅱ / ▶` 暂停或恢复监听；`↗` 展开详情；`?` 查看快捷键。关闭窗口后保留在 Windows 托盘或 Mac 菜单栏 **AC** 菜单，通过菜单可显示、暂停、退出。若托盘不可用，关闭窗口会直接退出，避免留下无法访问的后台进程。
 
-```powershell
+## 常用科研工作流
+
+- **PDF → 干净文本**：选中片段 →「转换」→「合并 PDF 断行」。保留空行分段；中英文均可。另提供需核对的连字符合并，不修改保存的原文，不自动清洗代码和表格。
+- **摘录 → 带出处引用**：按 `E` 填写来源、页码/章节、项目、标签及批注；「带出处复制」一并带走原文与定位。出处由用户填写，不自动猜测当前论文。
+- **BibTeX → Zotero / 写作**：保留原始 BibTeX，支持 `.bib` 导出供 Zotero 导入；GB/T 7714、APA 仅生成待校对草稿，不冒充完整引文排版引擎。
+- **表格 → Excel / Word / LaTeX**：制表符、Markdown 表格互转，提供 LaTeX `tabular`。制表符结果可粘贴到 Excel；Word 中可用“文本转换成表格”。
+- **公式、DOI、代码**：切换行内/独立 LaTeX，复制 DOI 链接、Markdown 引文或代码块。
+- **截图复用**：Windows 截图，或 Mac `Control+Shift+Command+4` 截图到剪贴板，自动保存 PNG，可预览、搜索标签并复制回其他软件。普通文件复制不会被导入为截图。
+- **查找与整理**：全文和研究信息检索、类型筛选、置顶、批量文本复制、Markdown/JSON 导出。界面显示最近 500 条匹配预览，搜索覆盖完整历史。
+
+「带出处复制」和其他文本结果可正常粘贴到 Word；本项目不提供 Word 插件或自动生成 `.docx`。
+
+## 快捷键
+
+| 操作 | Windows | macOS |
+| --- | --- | --- |
+| 全局唤出 | `Ctrl+Alt+V` | `Control+Option+V` |
+| 搜索 | `Ctrl+F` | `Command+F` |
+| 复制原文 / 格式化内容 | `Ctrl+Enter` / `Ctrl+Shift+Enter` | `Command+Enter` / `Command+Shift+Enter` |
+| 列表全选 | `Ctrl+A` | `Command+A` |
+| 上下选择、复制 | 方向键、`Enter` | 相同 |
+| 最近第 1–9 项 / 编辑 | `1–9` / `E` | 相同 |
+| 清空搜索，再次隐藏 / 帮助 | `Esc` / `F1` | 相同 |
+
+全局组合可在设置中修改，Mac 支持 `Cmd`、`Option` 名称；字母键按 ANSI 物理位置注册。系统占用的组合会显示注册失败，可换一个组合。Mac 不需要为此授予辅助功能或键盘监听权限。复制后切换到目标软件自行粘贴，程序不会模拟按键注入。
+
+## 体积、性能与隐私
+
+- 只在系统剪贴板变化后读取内容；暂停时不读取文本/图片。同一截图不会每 650 毫秒重新压缩。
+- 列表只读取 240 字符预览，选中后读取全文。500 条长文本的本地测试中，查询峰值 Python 分配从 **95.85 MiB 降至 0.49 MiB**；这不是应用总 RAM。[测量方法和限制](docs/research-and-validation.md)。
+- 默认保留 90 天、最多 2000 条未置顶记录、256 MiB 未置顶正文/图片。设置可调整；置顶条目不自动删除。SQLite 空闲页可复用，数据库文件和置顶内容不受该载荷上限严格限制。
+- 单张图片最大 1600 万像素、PNG 最大 32 MiB；超过限制会提示跳过。超大截图仍可能短暂影响响应。
+- macOS 尊重保密/临时剪贴板标记；各平台默认过滤常见密钥、Token 和验证码模式。过滤不能识别所有秘密，截图也不会做敏感内容 OCR。
+- 数据是**本机明文**，无上传、遥测、联网查 DOI。需要保密时请暂停监听。
+
+| 系统 | 数据目录 |
+| --- | --- |
+| Windows | `%LOCALAPPDATA%\AcademicClipboard` |
+| macOS | `~/Library/Application Support/AcademicClipboard` |
+| Linux | `$XDG_DATA_HOME/academic-clipboard`，默认 `~/.local/share/academic-clipboard` |
+
+目录包含 `clipboard.db`、`images/` 和设置。退出程序后复制整个目录可备份；JSON/Markdown 导出包含图片路径，不打包图片本体。`ACADEMIC_CLIPBOARD_HOME` 可指定独立数据目录。旧版数据库首次启动自动迁移，升级前建议备份。
+
+## 源码与开发
+
+使用 Python 3.10+，须包含 Tkinter（python.org 标准安装版包含；Linux 可安装系统 `python3-tk`）。
+
+```sh
 git clone https://github.com/Studyer-Tang/academic-clipboard.git
 cd academic-clipboard
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\academic-clipboard.exe
+# Mac/Linux: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev,packaging]"
+python -m academic_clipboard
+python -m unittest discover -s tests -v
+ruff check .
+ruff format --check .
+python scripts/benchmark.py
+python scripts/build_release.py
 ```
 
-如果还没有克隆仓库，也可以在项目目录直接执行后四条命令。Linux/macOS 使用 `./.venv/bin/python` 和 `./.venv/bin/academic-clipboard`。
+`Desktop builds` 工作流为 Windows x64、Mac arm64/x64 分别构建，运行单元测试并启动实际打包程序后生成 ZIP/DMG。PR 上传测试包；`v*` 标签仅在全部构建成功后发布预览版。
 
-如果启动时提示缺少 Tkinter，Windows 请重新运行 Python 安装程序并启用 `tcl/tk and IDLE`；Ubuntu/Debian 可安装系统包 `python3-tk`。CLI 数据管理命令不依赖图形界面。
-
-程序运行期间会监听文本和截图剪贴板。使用 `Win+Shift+S` 等工具截图后，图片会自动出现在历史中并在悬浮小窗内显示缩略图；选择其他截图即可切换预览，双击缩略图可直接复制。按 `Ctrl+Alt+V` 随时唤出小窗；使用方向键选择后按 Enter，或按数字 `1–9` 快速复制。复制完成后默认自动隐藏。文本可用 `Ctrl` 或 `Shift` 多选后合并复制；图片需要一次复制一张。点击标题栏的 `?` 或按 `F1` 可随时查看应用内快捷键说明。点击 **Expand / 展开** 可进入完整管理界面；再次点击 **Compact / 悬浮** 回到小窗。
-
-关闭窗口右上角的 `×` 后，程序会缩到 Windows 右下角系统托盘并继续监听，不再退出。双击托盘图标可以恢复小窗；右键菜单可暂停监听或彻底退出。如果图标没有直接显示，请在任务栏右侧的 `^` 隐藏图标区域中查找。
-
-### 无终端启动与开机启动 / Tray launch
-
-日常使用不需要一直保留 PowerShell。首次安装完成后，可执行一次：
-
-```powershell
-.\.venv\Scripts\academic-clipboard.exe launch
-```
-
-命令会立即返回，程序在后台托盘运行。也可以直接双击项目根目录的 `launch-academic-clipboard.vbs`。若要登录 Windows 后自动在托盘启动：
-
-```powershell
-.\.venv\Scripts\academic-clipboard.exe startup enable
-.\.venv\Scripts\academic-clipboard.exe startup status
-.\.venv\Scripts\academic-clipboard.exe startup disable
-```
-
-开机启动只写入当前 Windows 用户的 `HKCU\...\Run` 项，不需要管理员权限。移动项目目录或重建 `.venv` 后，请重新执行 `startup enable` 更新路径。
-
-## 命令行 / CLI
-
-```powershell
-academic-clipboard                 # 启动桌面界面
-academic-clipboard launch          # 无终端启动到系统托盘
-academic-clipboard startup enable  # 当前用户登录后自动启动
+```sh
+academic-clipboard run --paused      # 启动时不读取剪贴板内容
+academic-clipboard launch            # 后台托盘/菜单栏启动
+academic-clipboard startup enable    # 当前用户下次登录启动（Windows/macOS）
+academic-clipboard startup disable
+academic-clipboard startup status
 academic-clipboard list --limit 20
 academic-clipboard search "causal inference"
-academic-clipboard list --kind doi --json
-academic-clipboard export clipboard-notes.md
-academic-clipboard export clipboard-history.json
+academic-clipboard export notes.md
+academic-clipboard export history.json
+academic-clipboard export references.bib
 academic-clipboard stats
-academic-clipboard clear --yes     # 保留置顶项
-academic-clipboard clear --all --yes
+academic-clipboard clear --yes       # 删除未置顶历史
 ```
 
-所有子命令均可用 `--database PATH` 指定另一份 SQLite 数据库，例如：
+CLI 数据命令可在子命令前加 `--database PATH`。桌面程序使用数据目录中的数据库。Mac 开机启动使用当前用户 LaunchAgent，Windows 使用当前用户 Run 键；不需要管理员权限，移动安装位置后需重新启用。
 
-```powershell
-academic-clipboard --database .\demo.db list
-```
-
-## 快捷键 / Shortcuts
-
-| 快捷键 | 操作 |
-| --- | --- |
-| `Ctrl+F` | 聚焦搜索框 |
-| `Ctrl+Enter` | 复制所选原文 |
-| `Ctrl+Shift+Enter` | 复制所选格式化内容 |
-| `Ctrl+A`（列表聚焦时） | 选择当前列表全部项目 |
-| `Ctrl+Alt+V`（全局） | 从其他程序唤出剪贴板小窗 |
-| `Enter`（列表聚焦时） | 复制所选并按设置自动隐藏 |
-| `1`–`9`（列表聚焦时） | 快速复制对应的最近条目 |
-| `E`（列表聚焦时） | 编辑当前片段和标签 |
-| `Delete` | 删除所选项 |
-| `Esc` | 清空搜索；再次按下隐藏窗口 |
-| `F1` | 打开应用内快捷键说明 |
-| 双击列表项 | 复制该项原文 |
-
-## 数据与隐私 / Data and privacy
-
-默认数据库位置：
-
-- Windows: `%LOCALAPPDATA%\AcademicClipboard\clipboard.db`
-- macOS: `~/Library/Application Support/AcademicClipboard/clipboard.db`
-- Linux: `$XDG_DATA_HOME/academic-clipboard/clipboard.db`
-
-截图保存在同一数据目录下的 `images/` 文件夹中，文件名使用内容哈希生成。相同截图不会产生重复文件；删除记录、清空历史或自动清理过期记录时，对应图片文件也会一起删除。
-
-设置环境变量 `ACADEMIC_CLIPBOARD_HOME` 可以改变数据目录。
-
-重要：当前数据库是本机**明文 SQLite 文件**。敏感内容过滤只是降低误存风险，不能保证识别所有秘密。请不要把数据库提交到 Git，也不要在共享电脑上保存机密内容。详见 [SECURITY.md](SECURITY.md)。项目不会读取账号密码，也没有上传或遥测代码。
-
-## 当前边界 / Current limits
-
-- 图片剪贴板与图片回写目前以 Windows 为主要支持平台；复制的普通文件不会被当成截图保存。
-- 图片记录可添加标题、来源、图号、研究项目和批注，但暂不提供像素编辑，也不能与文本混合批量复制。
-- 当前支持 Windows 系统托盘；macOS/Linux 的托盘行为取决于桌面环境。
-- 全局快捷键目前仅在 Windows 提供；其他系统可通过托盘图标显示窗口。
-- 标题、公式、表格、代码语言与 URL 类别使用本地规则推断，可在整理窗口中人工修正内容和研究上下文。
-- GB/T 7714 和 APA 输出只使用剪贴板中已有的 BibTeX 字段，因此定位为“待校对草稿”，不会虚构缺失元数据。
-- 不联网查询 DOI 元数据，也不会自动访问论文网页；未来的元数据查询仍将保持明确选择后才联网。
-
-## 开发 / Development
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\ruff.exe format --check .
-.\.venv\Scripts\ruff.exe check .
-```
-
-架构说明见 [docs/architecture.md](docs/architecture.md)，贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-## Roadmap
-
-- v0.5：可选 Crossref/arXiv 元数据、项目批量引用导出和更强的全文检索。
-- v0.6：可选 Zotero、Obsidian 与 Word 工作流；公式和截图 OCR 仍须显式启用。
-- v1.0：稳定的数据迁移、无障碍改进、签名桌面安装包和自动更新。
-
-## Windows portable build
-
-仓库包含 `Windows portable app` GitHub Actions 工作流。手动运行可获得测试构建；推送 `v*` 标签会自动创建正式 GitHub Release，并附带 `AcademicClipboard.exe` 与 SHA-256 校验文件。开发者也可安装 `.[packaging]` 后使用相同的 PyInstaller 参数本地构建。
-
-## License
-
-[MIT](LICENSE)
+[架构](docs/architecture.md) · [需求调研与验证](docs/research-and-validation.md) · [安全边界](SECURITY.md) · [MIT License](LICENSE)

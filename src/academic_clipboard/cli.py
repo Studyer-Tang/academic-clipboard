@@ -22,9 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command")
     run_command = commands.add_parser("run", help="open the desktop clipboard drawer")
     run_command.add_argument("--hidden", action="store_true", help="start in the system tray")
-    commands.add_parser("launch", help="start the Windows tray app without keeping a terminal open")
+    run_command.add_argument("--paused", action="store_true", help="start without reading clipboard contents")
+    diagnostic = commands.add_parser("self-test", help="run an isolated desktop smoke test")
+    diagnostic.add_argument("--report", type=Path, required=True)
+    commands.add_parser("launch", help="start the tray app without keeping a terminal open")
 
-    startup = commands.add_parser("startup", help="manage launch at Windows sign-in")
+    startup = commands.add_parser("startup", help="manage launch at Windows/macOS sign-in")
     startup.add_argument("action", choices=("enable", "disable", "status"), nargs="?", default="status")
 
     listing = commands.add_parser("list", help="list recent clipboard items")
@@ -40,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     export = commands.add_parser("export", help="export local history")
     export.add_argument("path", type=Path)
-    export.add_argument("--format", choices=("markdown", "json"))
+    export.add_argument("--format", choices=("markdown", "json", "bibtex"))
 
     clear = commands.add_parser("clear", help="delete clipboard history")
     clear.add_argument("--all", action="store_true", help="also delete pinned items")
@@ -91,6 +94,10 @@ def _print_rows(rows: list[ClipboardItem], as_json: bool) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "self-test":
+        from academic_clipboard.diagnostics import main as desktop_test
+
+        return desktop_test(["--report", str(args.report)])
     if args.command in {None, "run"}:
         try:
             from academic_clipboard.app import run
@@ -104,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
                 "请安装带 Tcl/Tk 的标准版 Python。\n",
             )
 
-        return run(start_hidden=getattr(args, "hidden", False))
+        return run(start_hidden=getattr(args, "hidden", False), start_paused=getattr(args, "paused", False))
     if args.command == "launch":
         from academic_clipboard.startup import launch_background
 
@@ -138,8 +145,12 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "search":
         _print_rows(store.list_items(args.query, args.kind, args.limit), args.json)
     elif args.command == "export":
-        output_format = args.format or ("json" if args.path.suffix.casefold() == ".json" else "markdown")
-        if output_format == "json":
+        output_format = args.format or {".json": "json", ".bib": "bibtex"}.get(
+            args.path.suffix.casefold(), "markdown"
+        )
+        if output_format == "bibtex":
+            store.export_bibtex(args.path)
+        elif output_format == "json":
             store.export_json(args.path)
         else:
             store.export_markdown(args.path)
