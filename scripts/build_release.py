@@ -8,6 +8,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from academic_clipboard import __version__
@@ -76,7 +77,21 @@ def main():
         else Path("dist/AcademicClipboard/AcademicClipboard.exe")
     )
     report = Path("build/desktop-smoke.json").resolve()
-    subprocess.run([str(executable.resolve()), "self-test", "--report", str(report)], check=True, timeout=45)
+    report.unlink(missing_ok=True)
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("PYTHON") and key not in {"TCL_LIBRARY", "TK_LIBRARY"}
+    }
+    # A download must work outside the checkout and without development runtime paths.
+    with tempfile.TemporaryDirectory(prefix="academic-package-test-") as temporary:
+        subprocess.run(
+            [str(executable.resolve()), "self-test", "--report", str(report)],
+            check=True,
+            timeout=45,
+            cwd=temporary,
+            env=environment,
+        )
     if not json.loads(report.read_text(encoding="utf-8"))["ok"]:
         raise SystemExit("Bundled desktop smoke test failed")
     machine = "arm64" if platform.machine().lower() in {"arm64", "aarch64"} else "x64"
