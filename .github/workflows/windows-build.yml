@@ -61,7 +61,8 @@ jobs:
         with:
           prerelease: true
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
-            artifacts/*.zip
-            artifacts/*.dmg
-            artifacts/*.sha256
+            artifacts/dist/*.zip
+            artifacts/dist/*.dmg
+            artifacts/dist/*.sha256
