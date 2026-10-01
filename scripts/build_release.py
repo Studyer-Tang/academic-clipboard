@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from academic_clipboard import __version__
@@ -120,21 +121,28 @@ def main():
         )
         (stage / "Applications").symlink_to("/Applications")
         artifact = Path("dist") / f"{name}.dmg"
-        subprocess.run(
-            [
-                "hdiutil",
-                "create",
-                "-volname",
-                "Academic Clipboard",
-                "-srcfolder",
-                str(stage),
-                "-ov",
-                "-format",
-                "UDZO",
-                str(artifact),
-            ],
-            check=True,
-        )
+        command = [
+            "hdiutil",
+            "create",
+            "-volname",
+            "Academic Clipboard",
+            "-srcfolder",
+            str(stage),
+            "-ov",
+            "-format",
+            "UDZO",
+            str(artifact),
+        ]
+        for attempt in range(3):
+            result = subprocess.run(command, capture_output=True, text=True)
+            print(result.stdout + result.stderr, end="")
+            if result.returncode == 0:
+                break
+            if "Resource busy" not in result.stderr or attempt == 2:
+                result.check_returncode()
+            time.sleep(2 * (attempt + 1))
+        subprocess.run(["hdiutil", "verify", str(artifact)], check=True)
+
     else:
         artifact = Path(shutil.make_archive(str(Path("dist") / name), "zip", "dist", "AcademicClipboard"))
     digest = hashlib.sha256()
