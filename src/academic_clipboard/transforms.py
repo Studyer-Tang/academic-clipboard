@@ -108,7 +108,17 @@ def bibtex_reference(value: str, style: str) -> str:
         publication = ", ".join(part for part in (year, issue) if part)
         if pages:
             publication = f"{publication}: {pages}" if publication else pages
-        result = f"{author_text}. {title}[J]."
+        entry_type = re.match(r"@([A-Za-z]+)", value.strip())
+        document_type = {
+            "article": "J",
+            "book": "M",
+            "inproceedings": "C",
+            "phdthesis": "D",
+            "mastersthesis": "D",
+            "techreport": "R",
+            "online": "EB/OL",
+        }.get(entry_type.group(1).lower() if entry_type else "", "Z")
+        result = f"{author_text}. {title}[{document_type}]."
         if venue:
             result += f" {venue}"
         if publication:
@@ -125,13 +135,18 @@ def bibtex_reference(value: str, style: str) -> str:
 
 
 def table_rows(value: str) -> list[list[str]]:
-    lines = [line.strip() for line in value.strip().splitlines() if line.strip()]
+    lines = [line for line in value.splitlines() if line.strip()]
     if not lines:
         return []
     if all("\t" in line for line in lines):
         return [[cell.strip() for cell in line.split("\t")] for line in lines]
     if all("|" in line for line in lines):
-        rows = [[cell.strip() for cell in line.strip("|").split("|")] for line in lines]
+        rows = []
+        for line in lines:
+            line = line.strip().removeprefix("|")
+            if line.endswith("|") and not line.endswith(r"\|"):
+                line = line[:-1]
+            rows.append([cell.strip().replace(r"\|", "|") for cell in re.split(r"(?<!\\)\|", line)])
         return [row for row in rows if not all(re.fullmatch(r":?-{3,}:?", cell) for cell in row)]
     return []
 

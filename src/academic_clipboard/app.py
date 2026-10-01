@@ -473,8 +473,8 @@ class AcademicClipboardApp:
         return value if isinstance(value, str) else ""
 
     def _capture(self, value: str, force: bool = False) -> bool:
-        content = value.strip()
-        if not content:
+        content = value
+        if not content.strip():
             return False
         if len(content) > self.settings.max_characters:
             self.status_var.set("Skipped: clipboard text is too large / 已跳过：文本过大")

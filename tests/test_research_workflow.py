@@ -6,7 +6,13 @@ from contextlib import closing
 from pathlib import Path
 
 from academic_clipboard.storage import ClipboardStore
-from academic_clipboard.transforms import available_transforms, clean_pdf_text, latex_table
+from academic_clipboard.transforms import (
+    available_transforms,
+    bibtex_reference,
+    clean_pdf_text,
+    latex_table,
+    table_rows,
+)
 
 
 class ResearchWorkflowTests(unittest.TestCase):
@@ -39,6 +45,20 @@ class ResearchWorkflowTests(unittest.TestCase):
         transforms = {item.key: item.value for item in available_transforms(item)}
         self.assertEqual(transforms["tsv-table"], item.content)
         self.assertIn(r"\$5\_\{x\}", latex_table(item.content))
+
+    def test_empty_table_cells_and_literal_pipes_survive_conversion(self):
+        self.assertEqual(table_rows("\tvalue\t\n1\t2\t3"), [["", "value", ""], ["1", "2", "3"]])
+        self.assertEqual(table_rows(r"| a\|b | c |"), [["a|b", "c"]])
+        item = self.store.add("\tvalue\t\n1\t2\t3")
+        self.assertTrue(item.normalized_content.startswith("|  | value |  |"))
+
+    def test_edit_preserves_code_indentation_and_outer_newlines(self):
+        source = "    result = 1\n    return result\n"
+        item = self.store.add(source)
+        self.assertEqual(self.store.update(item.id, source, "Code").content, source)
+
+    def test_books_are_not_labelled_as_journal_articles(self):
+        self.assertIn("Book[M]", bibtex_reference("@book{demo, title={Book}}", "gbt"))
 
     def test_list_previews_are_bounded_but_selected_text_is_complete(self):
         text = "Research finding. " * 5000

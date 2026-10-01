@@ -115,8 +115,8 @@ def edit_item(
     result: list[tuple[str, str, str, str, str, str, str]] = []
 
     def save() -> None:
-        value = item.content if item.kind == "image" else content.get("1.0", "end-1c").strip()
-        if not value:
+        value = item.content if item.kind == "image" else content.get("1.0", "end-1c")
+        if not value.strip():
             messagebox.showerror(
                 "Academic Clipboard", "Content cannot be empty / 内容不能为空", parent=dialog
             )

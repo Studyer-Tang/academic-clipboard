@@ -297,8 +297,8 @@ class ClipboardStore:
         existing = self.get_many([identifier])
         if existing and existing[0].kind == "image":
             raise ValueError("image items cannot be edited as text")
-        clean_content = content.strip()
-        if not clean_content:
+        clean_content = content
+        if not clean_content.strip():
             raise ValueError("content cannot be empty")
         detected = classify(clean_content)
         digest = hashlib.sha256(clean_content.encode("utf-8")).hexdigest()
