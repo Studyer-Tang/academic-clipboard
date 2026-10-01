@@ -36,6 +36,6 @@ Apple Silicon, macOS, Python 3.13.15 / Tk 9.0.4; one local run, not a guarantee 
 | Packaged desktop smoke initialization | ~0.32 s (after Python imports; excludes cold process startup) |
 | Local arm64 DMG / installed `.app` | ~20 MiB / ~42 MiB; CI builds may differ |
 
-The allocation measurement is **not total application RAM**. Cocoa/Tk/Python and graphics buffers also consume memory. A paused GUI with three synthetic clips showed ~191 MiB RSS locally, including shared frameworks; screenshots can increase peaks. Size limits and preview loading prevent history size from directly becoming resident full-text history.
+The allocation measurement is **not total application RAM**. Cocoa/Tk/Python and graphics buffers also consume memory. A paused GUI with three synthetic clips showed ~191 MiB RSS locally, including shared frameworks. macOS `vmmap -summary` reported 81.5 MiB physical footprint (86.3 MiB peak) for the updated app; screenshots can increase peaks. Size limits and preview loading prevent history size from directly becoming resident full-text history.
 
 The owner additionally verified Control+Option+V brings up the app while another application is foreground on their Mac. Global key registration is automated; other physical keyboard layouts/reserved system shortcuts and first launch under Gatekeeper still need real-device acceptance. Windows and Intel macOS package checks run in CI; they do not cover every hardware/OS combination. Releases are unsigned previews, without Developer ID notarization or a Windows publisher certificate.

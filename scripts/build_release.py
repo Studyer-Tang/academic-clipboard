@@ -5,6 +5,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import plistlib
 import shutil
 import subprocess
 import sys
@@ -71,6 +72,19 @@ def main():
         arguments += ["--hidden-import", "pystray._win32"]
     arguments.append("src/academic_clipboard/__main__.py")
     subprocess.run(arguments, check=True)
+    if mac:
+        bundle = Path("dist/AcademicClipboard.app")
+        info_path = bundle / "Contents/Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        info.update(
+            CFBundleShortVersionString=__version__,
+            CFBundleVersion=__version__,
+            CFBundleDisplayName="Academic Clipboard",
+            LSApplicationCategoryType="public.app-category.productivity",
+        )
+        info_path.write_bytes(plistlib.dumps(info))
+        # Re-seal our own generated bundle after setting its version; this is ad-hoc, not Developer ID.
+        subprocess.run(["codesign", "--force", "--sign", "-", str(bundle)], check=True)
     executable = (
         Path("dist/AcademicClipboard.app/Contents/MacOS/AcademicClipboard")
         if mac
