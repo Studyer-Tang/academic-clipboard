@@ -9,6 +9,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from pathlib import Path
@@ -26,14 +27,25 @@ def main():
     icon = assets / ("academic-clipboard.icns" if mac else "academic-clipboard.ico")
     TrayController._create_icon().resize((1024, 1024)).save(icon)
     licenses = assets / "licenses"
-    licenses.mkdir(exist_ok=True)
+    if licenses.exists():
+        shutil.rmtree(licenses)
+    shutil.copytree("docs/licenses", licenses)
+    for candidate in (
+        Path(sys.base_prefix) / "LICENSE.txt",
+        Path(sysconfig.get_path("stdlib")) / "LICENSE.txt",
+    ):
+        if candidate.is_file():
+            shutil.copy2(candidate, licenses / "Python-LICENSE.txt")
+            break
+    else:
+        raise SystemExit("Python runtime license not found; preserve its notice before redistributing.")
     distributions = ["Pillow", "pyinstaller"] + (
         ["pyobjc-core", "pyobjc-framework-Cocoa"] if mac else ["pystray", "six"]
     )
     for name in distributions:
         distribution = importlib.metadata.distribution(name)
         for file in distribution.files or ():
-            if any(part.lower().startswith(("license", "copying")) for part in file.parts):
+            if file.name.lower().startswith(("license", "copying")) and file.suffix in {"", ".txt", ".LGPL"}:
                 source = Path(distribution.locate_file(file))
                 if source.is_file():
                     shutil.copy2(source, licenses / f"{name}-{source.name}")
