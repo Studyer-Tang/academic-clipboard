@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -114,8 +115,8 @@ def edit_item(
     result: list[tuple[str, str, str, str, str, str, str]] = []
 
     def save() -> None:
-        value = item.content if item.kind == "image" else content.get("1.0", "end-1c").strip()
-        if not value:
+        value = item.content if item.kind == "image" else content.get("1.0", "end-1c")
+        if not value.strip():
             messagebox.showerror(
                 "Academic Clipboard", "Content cannot be empty / 内容不能为空", parent=dialog
             )
@@ -139,7 +140,7 @@ def edit_item(
     ttk.Button(actions, text=tr("保存", "Save"), style="Accent.TButton", command=save).pack(
         side="right", padx=(0, 8)
     )
-    dialog.bind("<Control-Return>", lambda _event: save())
+    dialog.bind("<Command-Return>" if sys.platform == "darwin" else "<Control-Return>", lambda _event: save())
     dialog.bind("<Escape>", lambda _event: dialog.destroy())
     title_entry.focus_set()
     dialog.grab_set()
@@ -152,7 +153,7 @@ def edit_settings(parent: tk.Misc, settings: Settings) -> bool:
     dialog.title("Settings / 设置")
     dialog.transient(parent)
     dialog.resizable(False, False)
-    _center(dialog, parent, 520, 430)
+    _center(dialog, parent, 550, 490)
 
     frame = ttk.Frame(dialog, padding=18)
     frame.pack(fill="both", expand=True)
@@ -162,6 +163,7 @@ def edit_settings(parent: tk.Misc, settings: Settings) -> bool:
     theme_var = tk.StringVar(value=settings.theme)
     max_items_var = tk.StringVar(value=str(settings.max_items))
     retention_var = tk.StringVar(value=str(settings.retention_days))
+    storage_var = tk.StringVar(value=str(settings.max_storage_mb))
     auto_hide_var = tk.BooleanVar(value=settings.auto_hide_after_copy)
     topmost_var = tk.BooleanVar(value=settings.always_on_top)
     sensitive_var = tk.BooleanVar(value=settings.capture_sensitive)
@@ -179,13 +181,14 @@ def edit_settings(parent: tk.Misc, settings: Settings) -> bool:
         ),
         ("Maximum items / 最大条目", ttk.Entry(frame, textvariable=max_items_var)),
         ("Retention days / 保留天数", ttk.Entry(frame, textvariable=retention_var)),
+        ("Unpinned MiB / 未置顶容量", ttk.Entry(frame, textvariable=storage_var)),
     )
     for row, (label, widget) in enumerate(rows):
         ttk.Label(frame, text=label).grid(row=row, column=0, sticky="w", pady=7, padx=(0, 16))
         widget.grid(row=row, column=1, sticky="ew", pady=7)
 
     checks = ttk.Frame(frame)
-    checks.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 4))
+    checks.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(10, 4))
     ttk.Checkbutton(
         checks,
         text="Hide after copy / 复制后自动隐藏",
@@ -207,7 +210,7 @@ def edit_settings(parent: tk.Misc, settings: Settings) -> bool:
         text="Examples: Ctrl+Alt+V, Ctrl+Shift+Space. Press F1 or click ? for the full guide.\n"
         "快捷键示例：Ctrl+Alt+V、Ctrl+Shift+Space。按 F1 或点击 ? 查看完整说明。",
         style="Muted.TLabel",
-    ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(8, 14))
+    ).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 14))
 
     saved = tk.BooleanVar(value=False)
 
@@ -215,13 +218,13 @@ def edit_settings(parent: tk.Misc, settings: Settings) -> bool:
         try:
             maximum = int(max_items_var.get())
             retention = int(retention_var.get())
-            if maximum < 10 or retention < 1:
+            storage = int(storage_var.get())
+            if not (10 <= maximum <= 10000 and 1 <= retention <= 3650 and 16 <= storage <= 4096):
                 raise ValueError
         except ValueError:
             messagebox.showerror(
                 "Academic Clipboard",
-                "Maximum items must be at least 10 and retention at least 1 day.\n"
-                "最大条目不能少于 10，保留天数不能少于 1。",
+                "Items: 10–10000; days: 1–3650; MiB: 16–4096.\n容量限制不删除置顶内容；置顶项需手动管理。",
                 parent=dialog,
             )
             return
@@ -232,6 +235,7 @@ def edit_settings(parent: tk.Misc, settings: Settings) -> bool:
         settings.theme = theme_var.get()
         settings.max_items = maximum
         settings.retention_days = retention
+        settings.max_storage_mb = storage
         settings.auto_hide_after_copy = auto_hide_var.get()
         settings.always_on_top = topmost_var.get()
         settings.capture_sensitive = sensitive_var.get()
@@ -239,7 +243,7 @@ def edit_settings(parent: tk.Misc, settings: Settings) -> bool:
         dialog.destroy()
 
     actions = ttk.Frame(frame)
-    actions.grid(row=6, column=0, columnspan=2, sticky="e")
+    actions.grid(row=7, column=0, columnspan=2, sticky="e")
     ttk.Button(actions, text="Cancel / 取消", command=dialog.destroy).pack(side="right")
     ttk.Button(actions, text="Save / 保存", style="Accent.TButton", command=save).pack(
         side="right", padx=(0, 8)
@@ -285,9 +289,9 @@ def show_shortcuts(parent: tk.Misc, global_hotkey: str) -> None:
         row=5, column=0, columnspan=2, sticky="w", pady=(0, 6)
     )
     for offset, (keys, description) in enumerate(WINDOW_SHORTCUTS, start=6):
-        ttk.Label(frame, text=keys, style="Key.TLabel").grid(
-            row=offset, column=0, sticky="w", padx=(0, 18), pady=3
-        )
+        ttk.Label(
+            frame, text=keys.replace("Ctrl", "Cmd") if sys.platform == "darwin" else keys, style="Key.TLabel"
+        ).grid(row=offset, column=0, sticky="w", padx=(0, 18), pady=3)
         ttk.Label(frame, text=description).grid(row=offset, column=1, sticky="w", pady=3)
 
     actions = ttk.Frame(frame)

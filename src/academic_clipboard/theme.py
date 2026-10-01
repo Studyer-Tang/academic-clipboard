@@ -45,6 +45,10 @@ DARK = Palette(
 
 
 def system_uses_dark() -> bool:
+    if sys.platform == "darwin":
+        from Foundation import NSUserDefaults
+
+        return NSUserDefaults.standardUserDefaults().stringForKey_("AppleInterfaceStyle") == "Dark"
     if sys.platform != "win32":
         return False
     try:

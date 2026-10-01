@@ -8,6 +8,7 @@ from PIL import Image
 from academic_clipboard.images import _dib_bytes, encode_png, read_clipboard_image
 
 
+@patch("academic_clipboard.images.sys.platform", "win32")
 class ImageClipboardTests(unittest.TestCase):
     def test_encode_png_is_stable_and_preserves_dimensions(self) -> None:
         source = Image.new("RGB", (27, 13), "royalblue")

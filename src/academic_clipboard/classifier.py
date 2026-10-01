@@ -110,11 +110,11 @@ def classify(value: str) -> ClassifiedClip:
         parsed = urlparse(content)
         title = parsed.netloc.removeprefix("www.") + (parsed.path.rstrip("/") or "")
         return ClassifiedClip("url", subtype, title, url_markdown(content))
-    rows = table_rows(content)
+    rows = table_rows(value)
     if len(rows) >= 2 and min(len(row) for row in rows) >= 2:
         subtype = "tab-separated" if "\t" in content else "markdown"
         return ClassifiedClip(
-            "table", subtype, f"{len(rows)} × {max(len(row) for row in rows)} table", markdown_table(content)
+            "table", subtype, f"{len(rows)} × {max(len(row) for row in rows)} table", markdown_table(value)
         )
     if _looks_like_formula(content):
         preview = " ".join(content.split())[:100]
