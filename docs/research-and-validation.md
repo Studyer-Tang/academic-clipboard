@@ -11,6 +11,14 @@ Reviewed 2026-10-01. This is a small qualitative review of established workflows
 
 No network requests, account, AI model or telemetry were added to the application. Local snippets remain usable offline. OCR, cloud synchronization and online DOI enrichment are deferred because they add weight, privacy choices and metadata failure modes beyond this release's purpose.
 
+## Offline conversion boundaries
+
+BibTeX normalization now processes complete records separately and preserves nested braces, quoted values, escape sequences and field expressions. Both brace and parenthesis record delimiters are accepted. A malformed record or unsupported `@string`, `@comment`, `@preamble`, outside comment or trailing text causes the whole snippet to remain unchanged; the app does not salvage a partial bibliography. Reference drafts are offered only when every record has unambiguous literal fields. Macros, concatenation and duplicate fields keep their BibTeX copy action but receive no APA/GB/T draft action. Missing metadata is still visibly marked; author-name conventions, LaTeX commands and full citation-style conformance still require review. The stored original and `.bib` export remain untouched.
+
+Chinese title detection uses character length, research terms and sentence punctuation rather than whitespace word counts. It is a conservative heuristic: short or unconventional titles may remain text, and a long unpunctuated research sentence can still resemble a title. No model or online classification is used.
+
+DOI copy actions retain balanced suffix parentheses/brackets/braces and remove excess closing delimiters from surrounding prose. Links encode the destination and escape markup delimiters. Normalization still treats trailing `.`, `,`, `;` and `:` as prose punctuation; unusual DOI suffixes with those endings need an original-text check. Synthetic examples test string handling only and do not claim that a DOI is registered or that an online destination resolves.
+
 ## Repeatable checks
 
 ```sh

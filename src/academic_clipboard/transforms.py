@@ -4,12 +4,15 @@ import html
 import re
 from dataclasses import dataclass
 
+from academic_clipboard.bibtex import literal_fields, parse_bibtex
 from academic_clipboard.formatters import (
+    doi_latex,
     doi_markdown,
+    doi_url,
     format_bibtex,
     markdown_note,
-    normalize_doi,
     url_markdown,
+    url_title,
 )
 from academic_clipboard.i18n import tr
 from academic_clipboard.models import ClipboardItem
@@ -43,47 +46,25 @@ def quote_with_source(item: ClipboardItem) -> str:
     return quote + (f"\n\n— {attribution}" if attribution else "")
 
 
-def _clean_bibtex_value(value: str) -> str:
-    value = value.strip().rstrip(",").strip()
-    if len(value) >= 2 and ((value[0], value[-1]) in {("{", "}"), ('"', '"')}):
-        value = value[1:-1]
-    return re.sub(r"[{}]", "", value).strip()
-
-
 def bibtex_fields(value: str) -> dict[str, str]:
-    match = re.match(r"(?is)^@\w+\s*\{\s*([^,]+)\s*,(.*)\}\s*$", value.strip())
-    if not match:
+    """Return literal fields for one record; never merge a bibliography."""
+    entries = parse_bibtex(value)
+    if entries is None or len(entries) != 1:
         return {}
-    fields: dict[str, str] = {"key": match.group(1).strip()}
-    body = match.group(2)
-    start = 0
-    braces = 0
-    quoted = False
-    escaped = False
-    parts: list[str] = []
-    for index, character in enumerate(body):
-        if escaped:
-            escaped = False
-            continue
-        if character == "\\":
-            escaped = True
-            continue
-        if character == '"' and braces == 0:
-            quoted = not quoted
-        elif not quoted:
-            if character == "{":
-                braces += 1
-            elif character == "}":
-                braces = max(0, braces - 1)
-            elif character == "," and braces == 0:
-                parts.append(body[start:index])
-                start = index + 1
-    parts.append(body[start:])
-    for part in parts:
-        assignment = re.match(r"(?is)^\s*([\w-]+)\s*=\s*(.+?)\s*$", part)
-        if assignment:
-            fields[assignment.group(1).casefold()] = _clean_bibtex_value(assignment.group(2))
-    return fields
+    return literal_fields(entries[0]) or {}
+
+
+def _reference_records(value: str) -> list[tuple[str, dict[str, str]]] | None:
+    entries = parse_bibtex(value)
+    if entries is None:
+        return None
+    records = []
+    for entry in entries:
+        fields = literal_fields(entry)
+        if fields is None:
+            return None
+        records.append((entry.entry_type, fields))
+    return records
 
 
 def _authors(value: str) -> list[str]:
@@ -91,9 +72,13 @@ def _authors(value: str) -> list[str]:
 
 
 def bibtex_reference(value: str, style: str) -> str:
-    fields = bibtex_fields(value)
-    if not fields:
+    records = _reference_records(value)
+    if records is None:
         return value.strip()
+    return "\n\n".join(_reference_draft(fields, entry_type, style) for entry_type, fields in records)
+
+
+def _reference_draft(fields: dict[str, str], entry_type: str, style: str) -> str:
     authors = _authors(fields.get("author", ""))
     author_text = ", ".join(authors) if authors else tr("佚名", "Anonymous")
     title = fields.get("title", tr("未命名文献", "Untitled work"))
@@ -108,7 +93,6 @@ def bibtex_reference(value: str, style: str) -> str:
         publication = ", ".join(part for part in (year, issue) if part)
         if pages:
             publication = f"{publication}: {pages}" if publication else pages
-        entry_type = re.match(r"@([A-Za-z]+)", value.strip())
         document_type = {
             "article": "J",
             "book": "M",
@@ -117,7 +101,7 @@ def bibtex_reference(value: str, style: str) -> str:
             "mastersthesis": "D",
             "techreport": "R",
             "online": "EB/OL",
-        }.get(entry_type.group(1).lower() if entry_type else "", "Z")
+        }.get(entry_type, "Z")
         result = f"{author_text}. {title}[{document_type}]."
         if venue:
             result += f" {venue}"
@@ -218,27 +202,31 @@ def available_transforms(item: ClipboardItem) -> list[ContentTransform]:
             )
         )
     if item.kind == "doi":
-        doi = normalize_doi(item.content)
         transforms.extend(
             (
-                ContentTransform("doi-url", tr("DOI 链接", "DOI URL"), f"https://doi.org/{doi}"),
-                ContentTransform("markdown", "Markdown", doi_markdown(doi)),
-                ContentTransform("latex", "LaTeX", rf"\href{{https://doi.org/{doi}}}{{{doi}}}"),
+                ContentTransform("doi-url", tr("DOI 链接", "DOI URL"), doi_url(item.content)),
+                ContentTransform("markdown", "Markdown", doi_markdown(item.content)),
+                ContentTransform("latex", "LaTeX", doi_latex(item.content)),
             )
         )
     elif item.kind == "bibtex":
-        transforms.extend(
-            (
-                ContentTransform("bibtex", tr("规范 BibTeX", "Clean BibTeX"), format_bibtex(item.content)),
-                ContentTransform(
-                    "gbt", tr("GB/T 7714 草稿", "GB/T 7714 draft"), bibtex_reference(item.content, "gbt")
-                ),
-                ContentTransform("apa", tr("APA 草稿", "APA draft"), bibtex_reference(item.content, "apa")),
-            )
+        transforms.append(
+            ContentTransform("bibtex", tr("规范 BibTeX", "Clean BibTeX"), format_bibtex(item.content))
         )
+        if _reference_records(item.content) is not None:
+            transforms.extend(
+                (
+                    ContentTransform(
+                        "gbt", tr("GB/T 7714 草稿", "GB/T 7714 draft"), bibtex_reference(item.content, "gbt")
+                    ),
+                    ContentTransform(
+                        "apa", tr("APA 草稿", "APA draft"), bibtex_reference(item.content, "apa")
+                    ),
+                )
+            )
     elif item.kind == "url":
         markdown = url_markdown(item.content)
-        label = markdown.removeprefix("[").split("](", 1)[0]
+        label = url_title(item.content)
         transforms.extend(
             (
                 ContentTransform("markdown", "Markdown", markdown),

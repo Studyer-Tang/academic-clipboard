@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Normalize complete BibTeX records separately, including nested/escaped values and parenthesis-delimited records. Produce one reference draft per record without merging metadata; retain the original for malformed or unsupported snippets and withhold drafts for unresolved macros, concatenation or duplicate fields.
+- Recognize longer Chinese research titles conservatively while leaving short notes and sentence excerpts as text. Keep BibTeX containing a DOI classified as BibTeX.
+- Preserve balanced DOI suffix delimiters, remove extra surrounding closers, and encode DOI/URL link targets and escape Markdown labels. Keep HTML labels free of Markdown escapes and escape DOI LaTeX output.
+
 ## 0.5.0 preview
 
 - Add macOS native text/image pasteboard, menu bar item, registered global hotkey, Command shortcuts, dark-mode/language preference and per-user login launch. Keep Windows tray support.

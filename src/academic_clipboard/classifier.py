@@ -17,7 +17,8 @@ from academic_clipboard.transforms import markdown_table, table_rows
 
 URL_PATTERN = re.compile(r"(?i)^https?://[^\s]+$")
 BIBTEX_PATTERN = re.compile(
-    r"(?is)^@(?:article|book|inproceedings|misc|phdthesis|mastersthesis|techreport|online)\s*\{"
+    r"(?is)^@(?:article|book|booklet|inbook|incollection|inproceedings|manual|misc|"
+    r"phdthesis|mastersthesis|proceedings|techreport|unpublished|online)\s*[{(]"
 )
 
 
@@ -77,6 +78,16 @@ def _looks_like_code(value: str) -> bool:
 def _looks_like_title(value: str) -> bool:
     if "\n" in value or value.endswith((".", "?", "!", "。", "？", "！")):
         return False
+    chinese = re.findall(r"[\u3400-\u9fff]", value)
+    if chinese:
+        # Chinese titles do not have word separators. Keep short notes and
+        # sentence-like excerpts as text rather than treating every CJK line as a title.
+        return (
+            12 <= len(chinese) <= 100
+            and len(value) <= 160
+            and not re.search(r"[，。！？；.!?;]", value)
+            and bool(re.search(r"研究|分析|方法|模型|理论|算法|机制|框架|优化|估计|推断", value))
+        )
     words = re.findall(r"[\w\u3400-\u9fff'-]+", value, re.UNICODE)
     return 4 <= len(words) <= 30 and 20 <= len(value) <= 240
 
@@ -95,16 +106,16 @@ def classify(value: str) -> ClassifiedClip:
     content = value.strip()
     if not content:
         return ClassifiedClip("text", "empty", "Empty text", "")
+    if BIBTEX_PATTERN.match(content):
+        first = re.search(r"(?i)^@\w+\s*[{(]\s*([^,})]+)", content)
+        key = first.group(1).strip() if first else "BibTeX entry"
+        return ClassifiedClip("bibtex", "citation", key, format_bibtex(content))
     doi_match = DOI_PATTERN.fullmatch(content) or (
         DOI_PATTERN.search(content) if len(content) <= 180 else None
     )
     if doi_match:
         doi = normalize_doi(content)
-        return ClassifiedClip("doi", "paper", doi, doi_markdown(doi))
-    if BIBTEX_PATTERN.match(content):
-        first = re.search(r"(?i)^@\w+\s*\{\s*([^,]+)", content)
-        key = first.group(1).strip() if first else "BibTeX entry"
-        return ClassifiedClip("bibtex", "citation", key, format_bibtex(content))
+        return ClassifiedClip("doi", "paper", doi, doi_markdown(content))
     if URL_PATTERN.match(content):
         subtype = _url_subtype(content)
         parsed = urlparse(content)

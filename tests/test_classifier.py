@@ -21,6 +21,37 @@ class ClassifierTests(unittest.TestCase):
         result = classify("@article{demo, title={A Study}, year={2025}}")
         self.assertEqual((result.kind, result.subtype, result.title), ("bibtex", "citation", "demo"))
 
+    def test_bibtex_containing_a_doi_is_still_bibtex(self) -> None:
+        raw = "@article(demo, title={A Study}, doi={10.1000/example(foo)}, year=2025)"
+        result = classify(raw)
+        self.assertEqual((result.kind, result.title), ("bibtex", "demo"))
+        self.assertIn("doi = {10.1000/example(foo)},", result.normalized_content)
+
+    def test_chinese_research_titles_have_note_templates(self) -> None:
+        titles = (
+            "基于深度学习的多模态大模型推理与优化方法研究",
+            "高维随机矩阵的谱分布理论与渐近性质分析",
+            "基于 BERT 的中文文本分类模型与方法研究",
+        )
+        for raw in titles:
+            with self.subTest(raw=raw):
+                result = classify(raw)
+                self.assertEqual((result.kind, result.subtype), ("title", "paper-title"))
+                self.assertTrue(result.normalized_content.startswith(f"# {raw}\n"))
+
+    def test_chinese_short_notes_and_prose_remain_text(self) -> None:
+        notes = (
+            "今天学习了新的方法",
+            "优化模型",
+            "明天再继续阅读这一篇论文的第三章",
+            "这个模型的效果不错，明天可以继续研究",
+            "基于深度学习的方法研究。",
+            "第一段介绍了研究方法\n第二段说明结果",
+        )
+        for raw in notes:
+            with self.subTest(raw=raw):
+                self.assertEqual(classify(raw).kind, "text")
+
     def test_code_languages(self) -> None:
         cases = {
             "def answer():\n    return 42": "python",

@@ -102,6 +102,22 @@ class ResearchWorkflowTests(unittest.TestCase):
         self.store.export_bibtex(path)
         self.assertEqual(path.read_text().strip(), bib)
 
+    def test_bibtex_copy_and_export_keep_the_original_multi_record_snippet(self):
+        bib = (
+            "@article{one,title={{First, Nested} title},year={2024}}\n"
+            '@book(two,title="Second title",year=2025)'
+        )
+        item = self.store.add(bib)
+        actions = {action.key: action.value for action in available_transforms(item)}
+        self.assertEqual(actions["original"], bib)
+        self.assertEqual(self.store.get_many([item.id])[0].content, bib)
+        self.assertIn("@article{one,", actions["bibtex"])
+        self.assertIn("@book{two,", actions["bibtex"])
+        self.assertNotIn("@book", actions["apa"])
+        path = Path(self.temporary.name) / "references.bib"
+        self.store.export_bibtex(path)
+        self.assertEqual(path.read_text().strip(), bib)
+
     def test_export_is_not_truncated_by_the_ui_limit(self):
         with closing(sqlite3.connect(self.store.path)) as connection, connection:
             connection.executemany(

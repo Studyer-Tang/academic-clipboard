@@ -30,6 +30,48 @@ class TransformTests(unittest.TestCase):
         self.assertIn("A Result[J]", bibtex_reference(source, "gbt"))
         self.assertIn("https://doi.org/10.1000/test", bibtex_reference(source, "apa"))
 
+    def test_multiple_bibtex_records_have_separate_reference_drafts(self) -> None:
+        source = (
+            "@article{one,title={{First, Nested} title},author={A and B},year=2024}\n"
+            '@book(two,title="Second {title}",author={C and D},year={2025})'
+        )
+        self.assertEqual(bibtex_fields(source), {})
+        self.assertEqual(
+            bibtex_reference(source, "apa"),
+            "A, B (2024). First, Nested title.\n\nC, D (2025). Second title.",
+        )
+        self.assertEqual(
+            bibtex_reference(source, "gbt"),
+            "A, B. First, Nested title[J]., 2024.\n\nC, D. Second title[M]., 2025.",
+        )
+
+    def test_bibtex_drafts_require_complete_unambiguous_literal_metadata(self) -> None:
+        cases = (
+            "@article{key,title={Part One} # {Part Two},year=2025}",
+            "@article{key,title=unknown_macro,year=2025}",
+            "@article{key,title={Title},month=jan,year=2025}",
+            "@article{key,title={First},TITLE={Second},year=2025}",
+            "@article{one,title={First}}\n@article{two,title={Unclosed}",
+            "@article{one,title={First}}\n@comment{Keep this comment}",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            store = ClipboardStore(Path(directory) / "clips.db")
+            for source in cases:
+                with self.subTest(source=source):
+                    self.assertEqual(bibtex_fields(source), {})
+                    self.assertEqual(bibtex_reference(source, "apa"), source)
+                    item = store.add(source)
+                    actions = {action.key: action.value for action in available_transforms(item)}
+                    self.assertEqual(actions["original"], source)
+                    self.assertNotIn("apa", actions)
+                    self.assertNotIn("gbt", actions)
+
+    def test_url_html_label_does_not_include_markdown_escapes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            item = ClipboardStore(Path(directory) / "clips.db").add("https://example.test/a[part](one)")
+        actions = {action.key: action.value for action in available_transforms(item)}
+        self.assertEqual(actions["html"], '<a href="https://example.test/a[part](one)">a[part](one)</a>')
+
     def test_doi_has_url_markdown_and_latex_actions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             item = ClipboardStore(Path(directory) / "clips.db").add("10.1000/action")

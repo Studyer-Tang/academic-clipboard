@@ -1,71 +1,63 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote, unquote, urlparse
 
-DOI_PATTERN = re.compile(r"(?i)(?:https?://(?:dx\.)?doi\.org/|doi:\s*)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)")
+from academic_clipboard.bibtex import parse_bibtex
+
+DOI_PATTERN = re.compile(
+    r"(?i)(?:https?://(?:dx\.)?doi\.org/|doi:\s*)?(10\.\d{4,9}/[-._;()/:A-Z0-9\[\]{}+%]+)"
+)
 
 
 def normalize_doi(value: str) -> str:
     match = DOI_PATTERN.search(value.strip())
     if not match:
         raise ValueError("no DOI found")
-    return unquote(match.group(1)).rstrip(".,;:)]}").casefold()
+    doi = unquote(match.group(1))
+    while doi:
+        if doi[-1] in ".,;:":
+            doi = doi[:-1]
+        elif doi[-1] in ")]}":
+            closer = doi[-1]
+            opener = {")": "(", "]": "[", "}": "{"}[closer]
+            if doi.count(closer) <= doi.count(opener):
+                break
+            doi = doi[:-1]
+        else:
+            break
+    return doi.casefold()
+
+
+def doi_url(value: str) -> str:
+    return "https://doi.org/" + quote(normalize_doi(value), safe="/:._-;")
 
 
 def doi_markdown(value: str) -> str:
     doi = normalize_doi(value)
-    return f"[{doi}](https://doi.org/{doi})"
+    label = re.sub(r"([\\\[\]])", r"\\\1", doi)
+    return f"[{label}]({doi_url(value)})"
 
 
-def _bibtex_parts(body: str) -> list[str]:
-    parts: list[str] = []
-    start = 0
-    braces = 0
-    quoted = False
-    escaped = False
-    for index, character in enumerate(body):
-        if escaped:
-            escaped = False
-            continue
-        if character == "\\":
-            escaped = True
-            continue
-        if character == '"' and braces == 0:
-            quoted = not quoted
-        elif not quoted:
-            if character == "{":
-                braces += 1
-            elif character == "}":
-                braces = max(0, braces - 1)
-            elif character == "," and braces == 0:
-                part = body[start:index].strip()
-                if part:
-                    parts.append(part)
-                start = index + 1
-    tail = body[start:].strip()
-    if tail:
-        parts.append(tail)
-    return parts
+def doi_latex(value: str) -> str:
+    doi = normalize_doi(value)
+    target = doi_url(value).replace("%", r"\%")
+    label = re.sub(r"([%#&_{}])", r"\\\1", doi)
+    return rf"\href{{{target}}}{{{label}}}"
 
 
 def format_bibtex(value: str) -> str:
     raw = value.strip()
-    match = re.match(r"(?is)^@(\w+)\s*\{\s*([^,]+)\s*,(.*)\}\s*$", raw)
-    if not match:
+    entries = parse_bibtex(raw)
+    if entries is None:
         return raw
-    entry_type, key, body = match.groups()
-    fields = _bibtex_parts(body)
-    formatted = [f"@{entry_type.casefold()}{{{key.strip()},"]
-    for field in fields:
-        assignment = re.match(r"(?is)^([\w-]+)\s*=\s*(.+)$", field)
-        if assignment:
-            name, field_value = assignment.groups()
-            formatted.append(f"  {name.casefold()} = {field_value.strip()},")
-        else:
-            formatted.append(f"  {field.strip()},")
-    formatted.append("}")
-    return "\n".join(formatted)
+    formatted = []
+    for entry in entries:
+        lines = [f"@{entry.entry_type}{{{entry.key},"]
+        lines.extend(f"  {name} = {field_value}," for name, field_value in entry.fields)
+        lines.append("}")
+        formatted.append("\n".join(lines))
+    return "\n\n".join(formatted)
 
 
 def markdown_note(title: str) -> str:
@@ -88,7 +80,7 @@ def fenced_code(value: str, language: str = "text") -> str:
     return f"{fence}{language}\n{code}\n{fence}"
 
 
-def url_markdown(value: str) -> str:
+def url_title(value: str) -> str:
     url = value.strip()
     parsed = urlparse(url)
     host = parsed.netloc.removeprefix("www.")
@@ -100,4 +92,11 @@ def url_markdown(value: str) -> str:
         title = path.split("/")[-1].replace("-", " ").replace("_", " ").strip() or host
     else:
         title = host
-    return f"[{title}]({url})"
+    return title
+
+
+def url_markdown(value: str) -> str:
+    url = value.strip()
+    title = re.sub(r"([\\\[\]])", r"\\\1", url_title(url))
+    target = quote(url, safe="/:?&=#%+;,@!~*'._-")
+    return f"[{title}]({target})"
