@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 from pathlib import Path
 
 from academic_clipboard.models import ClipboardItem
@@ -148,12 +149,15 @@ def main(argv: list[str] | None = None) -> int:
         output_format = args.format or {".json": "json", ".bib": "bibtex"}.get(
             args.path.suffix.casefold(), "markdown"
         )
-        if output_format == "bibtex":
-            store.export_bibtex(args.path)
-        elif output_format == "json":
-            store.export_json(args.path)
-        else:
-            store.export_markdown(args.path)
+        try:
+            if output_format == "bibtex":
+                store.export_bibtex(args.path)
+            elif output_format == "json":
+                store.export_json(args.path)
+            else:
+                store.export_markdown(args.path)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            parser.error(str(error))
         print(f"exported={args.path}")
     elif args.command == "clear":
         if not args.yes:

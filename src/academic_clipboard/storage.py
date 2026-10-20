@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import TextIO
 
 from academic_clipboard.classifier import classify
 from academic_clipboard.models import ClipboardItem
@@ -483,16 +486,62 @@ class ClipboardStore:
             ):
                 yield _item(row)
 
-    def export_bibtex(self, path: Path) -> None:
+    @contextmanager
+    def _export_stream(self, path: Path) -> Iterator[TextIO]:
+        """Publish a complete export without replacing the store or a previous backup on failure."""
+        database = self.path.resolve()
+        protected = [Path(f"{database}{suffix}") for suffix in ("", "-wal", "-shm", "-journal")]
+        destination = path.resolve()
+        media = self.images_dir.resolve()
+        protected_message = "export destination must not overwrite the clipboard database or stored images"
+        if (
+            destination in protected
+            or destination.is_relative_to(media)
+            or (
+                media.exists()
+                and any(parent.exists() and parent.samefile(media) for parent in destination.parents)
+            )
+            or any(source.exists() and path.exists() and path.samefile(source) for source in protected)
+        ):
+            raise ValueError(protected_message)
+        possible_case_alias = (
+            destination.name.casefold() in {source.name.casefold() for source in protected}
+            and destination.parent.exists()
+            and destination.parent.samefile(database.parent)
+        )
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as stream:
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=".academic-clipboard-export-",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                # Probe this directory's real case behavior without creating a second file.
+                # On a case-sensitive volume, an uppercase sidecar is a different legal path.
+                case_alias = temporary.with_name(temporary.name.swapcase())
+                if possible_case_alias and case_alias.exists() and case_alias.samefile(temporary):
+                    raise ValueError(protected_message)
+                yield stream
+                stream.flush()
+                os.fsync(stream.fileno())
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    def export_bibtex(self, path: Path) -> None:
+        with self._export_stream(path) as stream:
             for item in self.iter_items():
                 if item.kind == "bibtex":
                     stream.write(item.content.strip() + "\n\n")
 
     def export_json(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as stream:
+        with self._export_stream(path) as stream:
             stream.write("[\n")
             for index, item in enumerate(self.iter_items()):
                 if index:
@@ -501,8 +550,7 @@ class ClipboardStore:
             stream.write("\n]\n")
 
     def export_markdown(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as stream:
+        with self._export_stream(path) as stream:
             stream.write("# Academic Clipboard export\n\n")
             for item in self.iter_items():
                 lines = [

@@ -702,12 +702,17 @@ class AcademicClipboardApp:
         if not path:
             return
         destination = Path(path)
-        if destination.suffix.casefold() == ".bib":
-            self.store.export_bibtex(destination)
-        elif destination.suffix.casefold() == ".json":
-            self.store.export_json(destination)
-        else:
-            self.store.export_markdown(destination)
+        try:
+            if destination.suffix.casefold() == ".bib":
+                self.store.export_bibtex(destination)
+            elif destination.suffix.casefold() == ".json":
+                self.store.export_json(destination)
+            else:
+                self.store.export_markdown(destination)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            self.status_var.set(tr("导出失败", "Export failed"))
+            messagebox.showerror("Academic Clipboard", str(error), parent=self.root)
+            return
         self.status_var.set(f"Exported to {destination.name} / 已导出")
 
     def toggle_capture(self) -> None:
